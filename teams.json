@@ -1,0 +1,173 @@
+{
+  "tournament": "ICC Men's T20 World Cup 2026",
+  "teams": [
+    {
+      "team": "India",
+      "captain": "Suryakumar Yadav",
+      "players": [
+        {"id": "ind_01", "name": "Abhishek Sharma", "role": "Batsman", "risk_level": "High"},
+        {"id": "ind_02", "name": "Ishan Kishan", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "ind_03", "name": "Tilak Varma", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "ind_04", "name": "Suryakumar Yadav", "role": "Batsman", "risk_level": "Low"},
+        {"id": "ind_05", "name": "Hardik Pandya", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "ind_06", "name": "Shivam Dube", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "ind_07", "name": "Rinku Singh", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "ind_08", "name": "Axar Patel", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "ind_09", "name": "Arshdeep Singh", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "ind_10", "name": "Varun Chakaravarthy", "role": "Bowler", "risk_level": "Low"},
+        {"id": "ind_11", "name": "Jasprit Bumrah", "role": "Bowler", "risk_level": "Low"},
+        {"id": "ind_12", "name": "Sanju Samson", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "ind_13", "name": "Mohammed Siraj", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "ind_14", "name": "Kuldeep Yadav", "role": "Bowler", "risk_level": "Low"},
+        {"id": "ind_15", "name": "Washington Sundar", "role": "All-rounder", "risk_level": "High"}
+      ]
+    },
+    {
+      "team": "Pakistan",
+      "captain": "Salman Agha",
+      "players": [
+        {"id": "pak_01", "name": "Sahibzada Farhan", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "pak_02", "name": "Saim Ayub", "role": "Batsman", "risk_level": "High"},
+        {"id": "pak_03", "name": "Salman Agha", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "pak_04", "name": "Babar Azam", "role": "Batsman", "risk_level": "Low"},
+        {"id": "pak_05", "name": "Usman Khan", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "pak_06", "name": "Khawaja Nafay", "role": "Batsman", "risk_level": "High"},
+        {"id": "pak_07", "name": "Shadab Khan", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "pak_08", "name": "Mohammad Nawaz", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "pak_09", "name": "Faheem Ashraf", "role": "All-rounder", "risk_level": "High"},
+        {"id": "pak_10", "name": "Shaheen Afridi", "role": "Bowler", "risk_level": "Low"},
+        {"id": "pak_11", "name": "Usman Tariq", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "pak_12", "name": "Abrar Ahmed", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "pak_13", "name": "Fakhar Zaman", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "pak_14", "name": "Naseem Shah", "role": "Bowler", "risk_level": "Low"},
+        {"id": "pak_15", "name": "Salman Mirza", "role": "Bowler", "risk_level": "High"}
+      ]
+    },
+    {
+      "team": "South Africa",
+      "captain": "Aiden Markram",
+      "players": [
+        {"id": "rsa_01", "name": "Ryan Rickelton", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "rsa_02", "name": "Quinton de Kock", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "rsa_03", "name": "Aiden Markram", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "rsa_04", "name": "Dewald Brevis", "role": "Batsman", "risk_level": "High"},
+        {"id": "rsa_05", "name": "Tristan Stubbs", "role": "Batsman", "risk_level": "Low"},
+        {"id": "rsa_06", "name": "David Miller", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "rsa_07", "name": "Jason Smith", "role": "All-rounder", "risk_level": "High"},
+        {"id": "rsa_08", "name": "Marco Jansen", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "rsa_09", "name": "Keshav Maharaj", "role": "Bowler", "risk_level": "Low"},
+        {"id": "rsa_10", "name": "Kagiso Rabada", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "rsa_11", "name": "Kwena Maphaka", "role": "Bowler", "risk_level": "High"},
+        {"id": "rsa_12", "name": "Anrich Nortje", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "rsa_13", "name": "Lungi Ngidi", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "rsa_14", "name": "Corbin Bosch", "role": "All-rounder", "risk_level": "High"},
+        {"id": "rsa_15", "name": "George Linde", "role": "All-rounder", "risk_level": "Medium"}
+      ]
+    },
+    {
+      "team": "England",
+      "captain": "Harry Brook",
+      "players": [
+        {"id": "eng_01", "name": "Phil Salt", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "eng_02", "name": "Jos Buttler", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "eng_03", "name": "Will Jacks", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "eng_04", "name": "Harry Brook", "role": "Batsman", "risk_level": "Low"},
+        {"id": "eng_05", "name": "Ben Duckett", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "eng_06", "name": "Liam Dawson", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "eng_07", "name": "Sam Curran", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "eng_08", "name": "Jamie Overton", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "eng_09", "name": "Rehan Ahmed", "role": "All-rounder", "risk_level": "High"},
+        {"id": "eng_10", "name": "Adil Rashid", "role": "Bowler", "risk_level": "Low"},
+        {"id": "eng_11", "name": "Jofra Archer", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "eng_12", "name": "Tom Banton", "role": "Wicketkeeper-Batsman", "risk_level": "High"},
+        {"id": "eng_13", "name": "Jacob Bethell", "role": "All-rounder", "risk_level": "High"},
+        {"id": "eng_14", "name": "Josh Tongue", "role": "Bowler", "risk_level": "High"},
+        {"id": "eng_15", "name": "Luke Wood", "role": "Bowler", "risk_level": "Medium"}
+      ]
+    },
+    {
+      "team": "New Zealand",
+      "captain": "Mitchell Santner",
+      "players": [
+        {"id": "nz_01", "name": "Tim Seifert", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "nz_02", "name": "Finn Allen", "role": "Batsman", "risk_level": "High"},
+        {"id": "nz_03", "name": "Rachin Ravindra", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "nz_04", "name": "Glenn Phillips", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "nz_05", "name": "Mark Chapman", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "nz_06", "name": "Daryl Mitchell", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "nz_07", "name": "Mitchell Santner", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "nz_08", "name": "James Neesham", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "nz_09", "name": "Matt Henry", "role": "Bowler", "risk_level": "Low"},
+        {"id": "nz_10", "name": "Lockie Ferguson", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "nz_11", "name": "Jacob Duffy", "role": "Bowler", "risk_level": "High"},
+        {"id": "nz_12", "name": "Devon Conway", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "nz_13", "name": "Ish Sodhi", "role": "Bowler", "risk_level": "Low"},
+        {"id": "nz_14", "name": "Kyle Jamieson", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "nz_15", "name": "Cole McConchie", "role": "All-rounder", "risk_level": "High"}
+      ]
+    },
+    {
+      "team": "Sri Lanka",
+      "captain": "Charith Asalanka",
+      "players": [
+        {"id": "sl_01", "name": "Pathum Nissanka", "role": "Batsman", "risk_level": "Low"},
+        {"id": "sl_02", "name": "Kusal Perera", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "sl_03", "name": "Kusal Mendis", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "sl_04", "name": "Charith Asalanka", "role": "Batsman", "risk_level": "Low"},
+        {"id": "sl_05", "name": "Janith Liyanage", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "sl_06", "name": "Kamindu Mendis", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "sl_07", "name": "Pavan Rathnayake", "role": "Batsman", "risk_level": "High"},
+        {"id": "sl_08", "name": "Wanindu Hasaranga", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "sl_09", "name": "Dunith Wellalage", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "sl_10", "name": "Maheesh Theekshana", "role": "Bowler", "risk_level": "Low"},
+        {"id": "sl_11", "name": "Matheesha Pathirana", "role": "Bowler", "risk_level": "Low"},
+        {"id": "sl_12", "name": "Dasun Shanaka", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "sl_13", "name": "Dushmantha Chameera", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "sl_14", "name": "Eshan Malinga", "role": "Bowler", "risk_level": "High"},
+        {"id": "sl_15", "name": "Dushan Hemantha", "role": "All-rounder", "risk_level": "High"}
+      ]
+    },
+    {
+      "team": "West Indies",
+      "captain": "Rovman Powell",
+      "players": [
+        {"id": "wi_01", "name": "Brandon King", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "wi_02", "name": "Shai Hope", "role": "Wicketkeeper-Batsman", "risk_level": "Low"},
+        {"id": "wi_03", "name": "Johnson Charles", "role": "Wicketkeeper-Batsman", "risk_level": "High"},
+        {"id": "wi_04", "name": "Sherfane Rutherford", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "wi_05", "name": "Rovman Powell", "role": "Batsman", "risk_level": "Low"},
+        {"id": "wi_06", "name": "Roston Chase", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "wi_07", "name": "Romario Shepherd", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "wi_08", "name": "Jason Holder", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "wi_09", "name": "Akeal Hosein", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "wi_10", "name": "Gudakesh Motie", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "wi_11", "name": "Shamar Joseph", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "wi_12", "name": "Shimron Hetmyer", "role": "Batsman", "risk_level": "High"},
+        {"id": "wi_13", "name": "Matthew Forde", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "wi_14", "name": "Jayden Seales", "role": "Bowler", "risk_level": "High"},
+        {"id": "wi_15", "name": "Obed McCoy", "role": "Bowler", "risk_level": "Medium"}
+      ]
+    },
+    {
+      "team": "Zimbabwe",
+      "captain": "Sikandar Raza",
+      "players": [
+        {"id": "zim_01", "name": "Brian Bennett", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "zim_02", "name": "Tadiwanashe Marumani", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "zim_03", "name": "Ryan Burl", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "zim_04", "name": "Sikandar Raza", "role": "All-rounder", "risk_level": "Low"},
+        {"id": "zim_05", "name": "Dion Myers", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "zim_06", "name": "Clive Madande", "role": "Wicketkeeper-Batsman", "risk_level": "Medium"},
+        {"id": "zim_07", "name": "Tony Munyonga", "role": "All-rounder", "risk_level": "High"},
+        {"id": "zim_08", "name": "Tashinga Musekiwa", "role": "All-rounder", "risk_level": "High"},
+        {"id": "zim_09", "name": "Wellington Masakadza", "role": "All-rounder", "risk_level": "Medium"},
+        {"id": "zim_10", "name": "Brad Evans", "role": "All-rounder", "risk_level": "High"},
+        {"id": "zim_11", "name": "Blessing Muzarabani", "role": "Bowler", "risk_level": "Low"},
+        {"id": "zim_12", "name": "Richard Ngarava", "role": "Bowler", "risk_level": "Medium"},
+        {"id": "zim_13", "name": "Ben Curran", "role": "Batsman", "risk_level": "Medium"},
+        {"id": "zim_14", "name": "Graeme Cremer", "role": "Bowler", "risk_level": "High"},
+        {"id": "zim_15", "name": "Tinotenda Maposa", "role": "Bowler", "risk_level": "High"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "tournament": "ICC Men's T20 World Cup 2026 - Super 8s",
+  "matches": [
+    { "match_id": "S8_01", "date": "2026-02-21", "time": "07:00 PM IST", "venue": "R. Premadasa Stadium, Colombo", "team1": "New Zealand", "team2": "Pakistan" },
+    { "match_id": "S8_02", "date": "2026-02-22", "time": "03:00 PM IST", "venue": "Pallekele Stadium, Kandy", "team1": "England", "team2": "Sri Lanka" },
+    { "match_id": "S8_03", "date": "2026-02-22", "time": "07:00 PM IST", "venue": "Narendra Modi Stadium, Ahmedabad", "team1": "India", "team2": "South Africa" },
+    { "match_id": "S8_04", "date": "2026-02-23", "time": "07:00 PM IST", "venue": "Wankhede Stadium, Mumbai", "team1": "Zimbabwe", "team2": "West Indies" },
+    { "match_id": "S8_05", "date": "2026-02-24", "time": "07:00 PM IST", "venue": "Pallekele Stadium, Kandy", "team1": "England", "team2": "Pakistan" },
+    { "match_id": "S8_06", "date": "2026-02-25", "time": "07:00 PM IST", "venue": "R. Premadasa Stadium, Colombo", "team1": "New Zealand", "team2": "Sri Lanka" },
+    { "match_id": "S8_07", "date": "2026-02-26", "time": "03:00 PM IST", "venue": "Narendra Modi Stadium, Ahmedabad", "team1": "South Africa", "team2": "West Indies" },
+    { "match_id": "S8_08", "date": "2026-02-26", "time": "07:00 PM IST", "venue": "M. A. Chidambaram Stadium, Chennai", "team1": "India", "team2": "Zimbabwe" },
+    { "match_id": "S8_09", "date": "2026-02-27", "time": "07:00 PM IST", "venue": "R. Premadasa Stadium, Colombo", "team1": "England", "team2": "New Zealand" },
+    { "match_id": "S8_10", "date": "2026-02-28", "time": "07:00 PM IST", "venue": "Pallekele Stadium, Kandy", "team1": "Pakistan", "team2": "Sri Lanka" },
+    { "match_id": "S8_11", "date": "2026-03-01", "time": "03:00 PM IST", "venue": "Arun Jaitley Stadium, Delhi", "team1": "Zimbabwe", "team2": "South Africa" },
+    { "match_id": "S8_12", "date": "2026-03-01", "time": "07:00 PM IST", "venue": "Eden Gardens, Kolkata", "team1": "India", "team2": "West Indies" }
+  ]
+}
