@@ -731,6 +731,34 @@ footer{
   .team-grid{grid-template-columns:1fr;}
   .modal-box{padding:24px 20px;}
 }
+/* Chip picker — click-to-toggle player selector */
+.chip-picker{
+  background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);
+  padding:10px;min-height:80px;
+}
+.chip-placeholder{font-size:.72rem;color:var(--txt3);font-style:italic;}
+.chip-team-lbl{
+  font-size:.6rem;font-weight:700;color:var(--txt3);letter-spacing:1px;
+  text-transform:uppercase;margin:8px 0 5px;
+}
+.chip-team-lbl:first-child{margin-top:0;}
+.chip-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;}
+.pchip{
+  display:inline-flex;align-items:center;gap:5px;
+  background:var(--s4);border:1px solid var(--brd2);border-radius:6px;
+  padding:5px 10px;cursor:pointer;transition:all .15s;
+  font-family:'DM Sans',sans-serif;user-select:none;
+}
+.pchip:hover{border-color:rgba(240,180,41,.5);background:rgba(240,180,41,.07);}
+.pchip--active{background:rgba(240,180,41,.14);border-color:var(--gld);box-shadow:0 0 0 1px var(--gld);}
+.pchip--active-excl{background:rgba(240,79,79,.14);border-color:var(--red);box-shadow:0 0 0 1px var(--red);}
+.pchip-name{font-size:.72rem;color:var(--txt);font-weight:500;line-height:1;}
+.pchip-role{font-size:.57rem;color:var(--txt3);background:var(--s1);border-radius:4px;padding:1px 5px;line-height:1.4;}
+.pchip--active .pchip-name{color:var(--gld);}
+.pchip--active .pchip-role{color:var(--gld);background:rgba(240,180,41,.1);}
+.pchip--active-excl .pchip-name{color:var(--red);}
+.pchip--active-excl .pchip-role{color:var(--red);background:rgba(240,79,79,.1);}
+.chip-summary{font-size:.69rem;margin-top:7px;min-height:18px;line-height:1.5;}
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9904803540658016"
      crossorigin="anonymous"></script>
@@ -1134,17 +1162,28 @@ HOME_PAGE = """<!DOCTYPE html>
       <!-- Group 4: Player controls -->
       <div class="adv-group">
         <div class="adv-group-title">🎯 Player Controls</div>
-        <div class="input-row">
-          <div class="input-group">
-            <label>Lock Players (comma-separated IDs)</label>
-            <input type="text" id="locked_players" placeholder="e.g. T1-P1, T2-P3">
+        <p style="font-size:.7rem;color:var(--txt3);margin-bottom:12px;">Select a match above to load players. <strong style="color:var(--txt2);">Click a player chip to select</strong> — click again to deselect. Multiple players can be selected.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+          <!-- Lock picker -->
+          <div>
+            <div style="font-size:.68rem;font-weight:700;color:var(--grn);letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;">🔒 Lock Players <span style="color:var(--txt3);font-weight:400;">(in every team)</span></div>
+            <div id="lock_picker" class="chip-picker">
+              <span class="chip-placeholder">Select a match first</span>
+            </div>
+            <div id="lock_summary" class="chip-summary"></div>
           </div>
-          <div class="input-group">
-            <label>Exclude Players (comma-separated IDs)</label>
-            <input type="text" id="excluded_players" placeholder="e.g. T1-P6, T2-P9">
+
+          <!-- Exclude picker -->
+          <div>
+            <div style="font-size:.68rem;font-weight:700;color:var(--red);letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;">🚫 Exclude Players <span style="color:var(--txt3);font-weight:400;">(never picked)</span></div>
+            <div id="excl_picker" class="chip-picker">
+              <span class="chip-placeholder">Select a match first</span>
+            </div>
+            <div id="excl_summary" class="chip-summary"></div>
           </div>
+
         </div>
-        <p style="font-size:.68rem;color:var(--txt3);margin-top:-6px;">Player IDs are shown in the team preview. Locked players appear in every team. Excluded players are never selected.</p>
       </div>
 
     </div><!-- /adv-section -->
@@ -1216,6 +1255,7 @@ function selectMatch(id, t1, t2, date, venue, el) {
   var info = document.getElementById('selInfo');
   info.style.display = 'block';
   info.innerHTML = '✅ <strong>' + t1 + ' vs ' + t2 + '</strong> · ' + date + ' · 📍 ' + venue;
+  populatePlayerDropdowns(t1, t2);
   setTimeout(function(){ scrollTo('section-mode'); }, 220);
 }
 
@@ -1224,6 +1264,7 @@ function setManual() {
   var t2 = document.getElementById('mt2').value;
   if (t1===t2) { showToast('Please select two different teams!', '#f04f4f'); return; }
   selT1=t1; selT2=t2; selMID='manual';
+  populatePlayerDropdowns(t1, t2);
   showToast('✅ Teams confirmed! Choose a mode below.', '#f0b429');
   setTimeout(function(){ scrollTo('section-mode'); }, 220);
 }
@@ -1236,9 +1277,110 @@ function selectMode(m, el) {
   setTimeout(function(){ scrollTo('section-criteria'); }, 220);
 }
 
-function parseIds(str) {
-  if (!str || !str.trim()) return [];
-  return str.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+/* ── Player dropdown population ── */
+/* allPlayers is keyed by team name, built from JSON data embedded below */
+var allPlayers = {{ players_json|tojson }};
+
+/* ── Chip picker state ── */
+var lockedIds  = [];   /* array of player IDs selected as locked  */
+var excludedIds = [];  /* array of player IDs selected as excluded */
+
+function populatePlayerDropdowns(t1, t2) {
+  var lockPicker = document.getElementById('lock_picker');
+  var exclPicker = document.getElementById('excl_picker');
+  if (!lockPicker || !exclPicker) return;
+
+  /* Reset state */
+  lockedIds = []; excludedIds = [];
+  updateSummary('lock');
+  updateSummary('excl');
+
+  var teams = [
+    { name: t1, players: (allPlayers[t1] || []).slice(0, 11) },
+    { name: t2, players: (allPlayers[t2] || []).slice(0, 11) }
+  ];
+
+  function buildPicker(container, type) {
+    container.innerHTML = '';
+    teams.forEach(function(team) {
+      /* Team label */
+      var lbl = document.createElement('div');
+      lbl.className = 'chip-team-lbl';
+      lbl.textContent = team.name;
+      container.appendChild(lbl);
+
+      /* Player chips */
+      var row = document.createElement('div');
+      row.className = 'chip-row';
+      (team.players || []).forEach(function(p) {
+        var chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'pchip';
+        chip.dataset.id   = p.id;
+        chip.dataset.name = p.name;
+        chip.dataset.type = type;
+        var roleShort = p.role.replace('Wicketkeeper-Batsman','WK')
+                              .replace('All-rounder','AR')
+                              .replace('Batsman','BAT')
+                              .replace('Bowler','BOWL');
+        chip.innerHTML = '<span class="pchip-name">' + p.name + '</span>'
+                       + '<span class="pchip-role">' + roleShort + '</span>';
+        chip.onclick = function() { toggleChip(chip, type); };
+        row.appendChild(chip);
+      });
+      container.appendChild(row);
+    });
+  }
+
+  buildPicker(lockPicker, 'lock');
+  buildPicker(exclPicker, 'excl');
+}
+
+function toggleChip(chip, type) {
+  var id   = chip.dataset.id;
+  var name = chip.dataset.name;
+  var arr  = (type === 'lock') ? lockedIds : excludedIds;
+  var otherArr = (type === 'lock') ? excludedIds : lockedIds;
+  var otherType = (type === 'lock') ? 'excl' : 'lock';
+
+  /* Can't be in both lists */
+  if (otherArr.indexOf(id) !== -1) {
+    showToast('⚠️ ' + name + ' is already in the other list.', '#f04f4f');
+    return;
+  }
+
+  var idx = arr.indexOf(id);
+  if (idx === -1) {
+    arr.push(id);
+    chip.classList.add(type === 'lock' ? 'pchip--active' : 'pchip--active-excl');
+  } else {
+    arr.splice(idx, 1);
+    chip.classList.remove('pchip--active');
+    chip.classList.remove('pchip--active-excl');
+  }
+
+  /* Sync active class on the mirrored chip in the other picker */
+  updateSummary(type);
+}
+
+function updateSummary(type) {
+  var arr = (type === 'lock') ? lockedIds : excludedIds;
+  var summaryEl = document.getElementById(type + '_summary');
+  if (!summaryEl) return;
+  if (arr.length === 0) { summaryEl.innerHTML = ''; return; }
+  var activeClass = (type === 'lock') ? 'pchip--active' : 'pchip--active-excl';
+  var names = [];
+  document.querySelectorAll('.pchip.' + activeClass + '[data-type="' + type + '"]').forEach(function(c) {
+    names.push(c.dataset.name);
+  });
+  var color = (type === 'lock') ? 'var(--grn)' : 'var(--red)';
+  summaryEl.innerHTML = '<span style="color:' + color + ';font-weight:600;">'
+    + (type === 'lock' ? '🔒' : '🚫') + ' ' + names.length + ' selected: </span>'
+    + '<span style="color:var(--txt2);">' + names.join(', ') + '</span>';
+}
+
+function getPickerIds(type) {
+  return (type === 'lock') ? lockedIds.slice() : excludedIds.slice();
 }
 
 function doGenerate() {
@@ -1252,14 +1394,14 @@ function doGenerate() {
   });
 
   var adv = {
-    unique_cap:   document.getElementById('unique_cap') ? document.getElementById('unique_cap').checked : false,
-    unique_vc:    document.getElementById('unique_vc') ? document.getElementById('unique_vc').checked : false,
-    differential: document.getElementById('differential') ? document.getElementById('differential').checked : false,
+    unique_cap:    document.getElementById('unique_cap') ? document.getElementById('unique_cap').checked : false,
+    unique_vc:     document.getElementById('unique_vc') ? document.getElementById('unique_vc').checked : false,
+    differential:  document.getElementById('differential') ? document.getElementById('differential').checked : false,
     balanced_dist: document.getElementById('balanced_dist') ? document.getElementById('balanced_dist').checked : false,
-    exposure_pct: parseInt(document.getElementById('exposure') ? document.getElementById('exposure').value : 75) || 75,
-    max_from_one: parseInt(document.getElementById('max_from_one') ? document.getElementById('max_from_one').value : 7) || 7,
-    locked:       parseIds(document.getElementById('locked_players') ? document.getElementById('locked_players').value : ''),
-    excluded:     parseIds(document.getElementById('excluded_players') ? document.getElementById('excluded_players').value : '')
+    exposure_pct:  parseInt(document.getElementById('exposure') ? document.getElementById('exposure').value : 75) || 75,
+    max_from_one:  parseInt(document.getElementById('max_from_one') ? document.getElementById('max_from_one').value : 7) || 7,
+    locked:        getPickerIds('lock'),
+    excluded:      getPickerIds('excl')
   };
 
   var payload = {
@@ -1307,7 +1449,6 @@ RESULTS_PAGE = """<!DOCTYPE html>
   </div>
   <nav class="hdr-nav">
     <a href="/">← Home</a>
-    <a href="#" onclick="window.print();return false;">🖨 Print</a>
     <a href="/export_pdf" id="pdfBtn" {% if not unlocked %}style="display:none"{% endif %} class="cta">📄 PDF</a>
   </nav>
 </header>
@@ -1671,11 +1812,14 @@ function submitForm(e) {
 def home():
     td = load_teams()
     md = load_matches()
+    # Build {team_name: [players]} dict for JS dropdowns
+    players_json = {t["team"]: t["players"][:11] for t in td["teams"]}
     return render_template_string(
         HOME_PAGE,
         tournament=td.get("tournament", "ICC T20 WC 2026"),
         matches=md["matches"],
         all_teams=td["teams"],
+        players_json=players_json,
     )
 
 
