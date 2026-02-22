@@ -711,6 +711,30 @@ footer{
 @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
 .fade-up{animation:fadeUp .35s ease both;}
 
+/* Success banner on results page */
+.success-banner{
+  background:linear-gradient(135deg,rgba(16,212,142,.08),rgba(16,212,142,.04));
+  border-bottom:1px solid rgba(16,212,142,.2);
+  padding:10px 28px;display:flex;align-items:center;gap:12px;
+  font-size:.8rem;color:var(--txt2);
+}
+.success-banner strong{color:var(--grn);display:block;font-size:.85rem;margin-bottom:1px;}
+.success-sub{font-size:.72rem;color:var(--txt3);}
+@media(max-width:480px){.success-banner{padding:9px 14px;font-size:.74rem;}}
+
+/* Focus ring for keyboard nav */
+:focus-visible{outline:2px solid var(--gld);outline-offset:2px;border-radius:4px;}
+button:focus-visible,a:focus-visible{outline:2px solid var(--gld);outline-offset:3px;}
+
+/* Smoother card transitions */
+.team-card,.match-card,.mode-card,.crit-item{will-change:transform;}
+
+/* Nav mobile collapse */
+@media(max-width:600px){
+  .hdr-nav a:not(.cta){display:none;}
+  .logo-badge{display:none;}
+}
+
 /* Print */
 @media print{
   header,nav,.unlock-banner,.btn,.copy-btn,.lock-ov,.modal-bg,.toast,footer,
@@ -731,6 +755,53 @@ footer{
   .team-grid{grid-template-columns:1fr;}
   .modal-box{padding:24px 20px;}
 }
+/* Skip link for accessibility */
+.skip-link{
+  position:absolute;top:-50px;left:18px;z-index:9999;
+  background:var(--gld);color:#000;padding:8px 16px;border-radius:0 0 8px 8px;
+  font-size:.8rem;font-weight:700;text-decoration:none;transition:top .2s;
+}
+.skip-link:focus{top:0;}
+
+/* Loading spinner */
+.spinner-overlay{
+  position:fixed;inset:0;background:rgba(8,9,15,.92);z-index:8000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  opacity:0;pointer-events:none;transition:opacity .25s;
+}
+.spinner-overlay.active{opacity:1;pointer-events:all;}
+.spinner{width:52px;height:52px;border:4px solid var(--brd2);
+  border-top-color:var(--gld);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.spinner-text{font-family:"Barlow Condensed",sans-serif;font-size:1.3rem;font-weight:700;
+  letter-spacing:2px;color:var(--gld);}
+.spinner-sub{font-size:.75rem;color:var(--txt3);}
+
+/* Generate button loading state */
+.btn-generating{opacity:.7;cursor:not-allowed;pointer-events:none;}
+.btn-generating::after{
+  content:"";display:inline-block;width:14px;height:14px;margin-left:8px;
+  border:2px solid rgba(0,0,0,.3);border-top-color:#000;
+  border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;
+}
+
+/* Step progress indicator */
+.step-bar{display:flex;align-items:center;gap:0;margin-bottom:20px;width:100%;}
+.step{display:flex;align-items:center;gap:7px;flex:1;}
+.step-num{
+  width:26px;height:26px;border-radius:50%;border:2px solid var(--brd2);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.72rem;font-weight:700;color:var(--txt3);flex-shrink:0;transition:all .25s;
+}
+.step-lbl{font-size:.68rem;color:var(--txt3);transition:color .25s;white-space:nowrap;}
+.step-line{flex:1;height:1px;background:var(--brd);margin:0 4px;transition:background .25s;}
+.step.done .step-num{background:var(--grn);border-color:var(--grn);color:#000;}
+.step.done .step-lbl{color:var(--grn);}
+.step.done .step-line{background:var(--grn);}
+.step.active .step-num{background:var(--gld);border-color:var(--gld);color:#000;}
+.step.active .step-lbl{color:var(--gld);}
+@media(max-width:480px){.step-lbl{display:none;}.step-line{margin:0 2px;}}
+
 /* Chip picker — click-to-toggle player selector */
 .chip-picker{
   background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);
@@ -960,26 +1031,46 @@ function copyTeam(idx) {
 HOME_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>FantasyXI — ICC T20 WC 2026 Super 8s Fantasy Team Generator</title>
-<meta name="description" content="Generate 20 unique fantasy cricket teams for ICC T20 World Cup 2026 Super 8s. Smart distribution engine with Safe, Balanced and Risky modes. Free team generator.">
+<title>FantasyXI — ICC T20 WC 2026 Super 8s Fantasy Team Generator | Free Dream11 Teams</title>
+<meta name="description" content="Generate 20 unique fantasy cricket teams for ICC T20 World Cup 2026 Super 8s. Smart distribution with Safe, Balanced and Risky modes. Free Dream11 team generator.">
 <meta name="keywords" content="fantasy cricket, T20 World Cup 2026, fantasy team generator, ICC Super 8s, dream11 teams, fantasy XI, cricket team generator">
 <meta name="robots" content="index, follow">
-<meta property="og:title" content="FantasyXI — ICC T20 WC 2026 Fantasy Team Generator">
-<meta property="og:description" content="Generate 20 unique optimised fantasy cricket teams for Super 8s matches. 100% free.">
+<meta name="author" content="FantasyXI">
+<meta property="og:title" content="FantasyXI — ICC T20 WC 2026 Super 8s Fantasy Team Generator">
+<meta property="og:description" content="Generate 20 unique fantasy cricket teams for ICC T20 WC 2026 Super 8s. Safe, Balanced and Risky modes. 100% free.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://fantasyxi.in/">
+<meta property="og:site_name" content="FantasyXI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FantasyXI — ICC T20 WC 2026 Fantasy Team Generator">
+<meta name="twitter:description" content="Generate 20 unique fantasy cricket teams for T20 WC 2026 Super 8s. Free, instant, smart.">
 <link rel="canonical" href="https://fantasyxi.in/">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is FantasyXI free to use?","acceptedAnswer":{"@type":"Answer","text":"Yes. The first 3 teams are always free. Remaining teams unlock by watching a short simulated ad — no payment required."}},{"@type":"Question","name":"Which players are included?","acceptedAnswer":{"@type":"Answer","text":"Only confirmed Playing XI players (top 11) are used. Bench players are never included."}},{"@type":"Question","name":"What is the difference between Safe, Balanced, and Risky modes?","acceptedAnswer":{"@type":"Answer","text":"Safe weights low-risk captains for small contests. Balanced mixes risk. Risky maximises differentials for mega contests."}},{"@type":"Question","name":"Are these teams guaranteed to win?","acceptedAnswer":{"@type":"Answer","text":"No. FantasyXI is an informational tool. Outcomes depend on real match events. Always play responsibly."}}]}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","name":"FantasyXI","url":"https://fantasyxi.in","description":"ICC T20 World Cup 2026 Super 8s fantasy cricket team generator"}
+</script>
 """ + _CSS + """
 </head>
 <body>
+<a href="#tool" class="skip-link" aria-label="Skip to team generator">Skip to generator</a>
 
-<header>
+<!-- Loading spinner overlay -->
+<div class="spinner-overlay" id="spinnerOverlay" role="status" aria-live="polite">
+  <div class="spinner" aria-hidden="true"></div>
+  <div class="spinner-text">Generating Teams…</div>
+  <div class="spinner-sub">Running distribution engine · Please wait</div>
+</div>
+
+<header role="banner">
   <div class="logo-wrap">
     <div>
-      <div class="logo">⚡ FantasyXI</div>
+      <div class="logo" aria-label="FantasyXI logo">⚡ FantasyXI</div>
     </div>
     <span class="logo-badge">Super 8s · T20 WC 2026</span>
   </div>
-  <nav class="hdr-nav">
+  <nav class="hdr-nav" aria-label="Main navigation">
     <a href="/about">About</a>
     <a href="/how-it-works">How It Works</a>
     <a href="/privacy">Privacy</a>
@@ -1000,22 +1091,46 @@ HOME_PAGE = """<!DOCTYPE html>
   </div>
 </div>
 
-<div class="wrap z1" id="tool">
+<main class="wrap z1" id="tool" aria-label="Fantasy Team Generator">
 
-  <div class="age-bar">⚠️ This tool is intended for users aged 18 and above. Fantasy sports may involve financial risk in paid contests. Play responsibly.</div>
+  <!-- Step progress indicator -->
+  <div class="step-bar" id="stepBar" aria-label="Progress steps">
+    <div class="step" id="step1">
+      <div class="step-num" aria-label="Step 1">1</div>
+      <span class="step-lbl">Select Match</span>
+      <div class="step-line"></div>
+    </div>
+    <div class="step" id="step2">
+      <div class="step-num" aria-label="Step 2">2</div>
+      <span class="step-lbl">Choose Mode</span>
+      <div class="step-line"></div>
+    </div>
+    <div class="step" id="step3">
+      <div class="step-num" aria-label="Step 3">3</div>
+      <span class="step-lbl">Set Criteria</span>
+      <div class="step-line"></div>
+    </div>
+    <div class="step" id="step4">
+      <div class="step-num" aria-label="Step 4">4</div>
+      <span class="step-lbl">Generate</span>
+      <div class="step-line" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="age-bar" role="note">⚠️ This tool is intended for users aged 18 and above. Fantasy sports may involve financial risk in paid contests. Play responsibly.</div>
 
   <!-- Tabs -->
   <div class="tab-bar">
-    <button class="tab-btn active" onclick="showTab('up', this)">📅 Upcoming Matches</button>
-    <button class="tab-btn" onclick="showTab('man', this)">⚙ Manual Selection</button>
+    <button class="tab-btn active" onclick="showTab('up', this)" role="tab" aria-selected="true" aria-controls="tab-up">📅 Upcoming Matches</button>
+    <button class="tab-btn" onclick="showTab('man', this)" role="tab" aria-selected="false" aria-controls="tab-man">⚙ Manual Selection</button>
   </div>
 
   <!-- UPCOMING -->
-  <div id="tab-up">
-    <div class="sh">Select a Match</div>
-    <div class="match-grid">
+  <div id="tab-up" role="tabpanel">
+    <h2 class="sh">Select a Match</h2>
+    <div class="match-grid" role="list" aria-label="Upcoming matches">
     {% for m in matches %}
-      <div class="match-card" onclick="selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(\"'\",\"\")}}', this)">
+      <div class="match-card" role="listitem button" tabindex="0" onclick="selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(\"'\",\"\")}}', this)">
         <div class="match-time">{{m.time}}</div>
         <div class="match-id-tag">📅 {{m.date}} · {{m.match_id}}</div>
         <div class="match-vs">{{m.team1}}<em>VS</em>{{m.team2}}</div>
@@ -1044,21 +1159,21 @@ HOME_PAGE = """<!DOCTYPE html>
 
   <!-- Part 4: Mode section — scroll target -->
   <div id="section-mode">
-    <div class="sh">Generation Mode</div>
-    <div class="mode-grid">
-      <div class="mode-card safe" onclick="selectMode('safe', this)">
+    <h2 class="sh">Generation Mode</h2>
+    <div class="mode-grid" role="radiogroup" aria-label="Select generation mode">
+      <div class="mode-card safe" onclick="selectMode('safe', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('safe',this)">
         <div class="mode-icon">🛡</div>
         <div class="mode-name">Safe</div>
         <div class="mode-desc">Low-risk captains · Conservative stable picks</div>
         <div class="mode-note">Best for small contests</div>
       </div>
-      <div class="mode-card balanced" onclick="selectMode('balanced', this)">
+      <div class="mode-card balanced" onclick="selectMode('balanced', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('balanced',this)">
         <div class="mode-icon">⚖️</div>
         <div class="mode-name">Balanced</div>
         <div class="mode-desc">Mixed risk · Smart C/VC rotation</div>
         <div class="mode-note">Best for mid-size contests</div>
       </div>
-      <div class="mode-card risky" onclick="selectMode('risky', this)">
+      <div class="mode-card risky" onclick="selectMode('risky', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('risky',this)">
         <div class="mode-icon">🔥</div>
         <div class="mode-name">Risky</div>
         <div class="mode-desc">High-risk differentials · Max points ceiling</div>
@@ -1069,7 +1184,7 @@ HOME_PAGE = """<!DOCTYPE html>
 
   <!-- Part 3: Advanced Criteria — scroll target -->
   <div id="section-criteria">
-    <div class="sh">Advanced Criteria</div>
+    <h2 class="sh">Advanced Criteria</h2>
 
     <div class="adv-section">
 
@@ -1189,15 +1304,18 @@ HOME_PAGE = """<!DOCTYPE html>
     </div><!-- /adv-section -->
 
     <div class="btn-row">
-      <button class="btn btn-gold btn-lg" onclick="doGenerate()">⚡ Generate Teams</button>
-      <button class="btn btn-ghost" onclick="resetAll()">↺ Reset</button>
+      <button class="btn btn-gold btn-lg" id="generateBtn" onclick="doGenerate()"
+        aria-label="Generate fantasy teams based on selected settings">
+        ⚡ Generate Teams
+      </button>
+      <button class="btn btn-ghost" onclick="resetAll()" aria-label="Reset all selections">↺ Reset</button>
     </div>
   </div>
 
-</div><!-- /wrap -->
+</main><!-- /main tool -->
 
 <!-- Content section -->
-<div class="content-section z1">
+<section class="content-section z1" aria-label="How it works and FAQ">
   <h2>How FantasyXI Works</h2>
   <p>FantasyXI uses a smart distribution engine to generate up to 20 unique fantasy cricket teams for any ICC T20 World Cup 2026 Super 8s match. Every team is built exclusively from the confirmed Playing XI of each side — bench players are never included.</p>
 
@@ -1233,12 +1351,25 @@ HOME_PAGE = """<!DOCTYPE html>
     <div class="faq-q" onclick="toggleFaq(this)">Is this site affiliated with Dream11, ICC, or BCCI? <span class="arrow">▼</span></div>
     <div class="faq-a">No. FantasyXI is an independent tool. It is not affiliated with Dream11, ICC, BCCI, or any official cricket or fantasy sports organisation.</div>
   </div>
-</div><!-- /content-section -->
+</section><!-- /content-section -->
 
 """ + _FOOTER + _AD_MODAL + """
 
 <script>
 var selT1=null, selT2=null, selMID=null, selMode=null;
+var currentStep = 0;
+
+/* ── Step bar updater ── */
+function setStep(n) {
+  currentStep = n;
+  for (var i = 1; i <= 4; i++) {
+    var el = document.getElementById('step' + i);
+    if (!el) continue;
+    el.classList.remove('done', 'active');
+    if (i < n) el.classList.add('done');
+    else if (i === n) el.classList.add('active');
+  }
+}
 
 function showTab(id, el) {
   document.getElementById('tab-up').style.display = id==='up' ? '' : 'none';
@@ -1256,6 +1387,7 @@ function selectMatch(id, t1, t2, date, venue, el) {
   info.style.display = 'block';
   info.innerHTML = '✅ <strong>' + t1 + ' vs ' + t2 + '</strong> · ' + date + ' · 📍 ' + venue;
   populatePlayerDropdowns(t1, t2);
+  setStep(2);
   setTimeout(function(){ scrollTo('section-mode'); }, 220);
 }
 
@@ -1265,6 +1397,7 @@ function setManual() {
   if (t1===t2) { showToast('Please select two different teams!', '#f04f4f'); return; }
   selT1=t1; selT2=t2; selMID='manual';
   populatePlayerDropdowns(t1, t2);
+  setStep(2);
   showToast('✅ Teams confirmed! Choose a mode below.', '#f0b429');
   setTimeout(function(){ scrollTo('section-mode'); }, 220);
 }
@@ -1272,8 +1405,9 @@ function setManual() {
 /* Part 4: auto-scroll after mode select */
 function selectMode(m, el) {
   selMode = m;
-  document.querySelectorAll('.mode-card').forEach(function(c){ c.classList.remove('active'); });
-  el.classList.add('active');
+  document.querySelectorAll('.mode-card').forEach(function(c){ c.classList.remove('active'); c.setAttribute('aria-checked','false'); });
+  el.classList.add('active'); el.setAttribute('aria-checked','true');
+  setStep(3);
   setTimeout(function(){ scrollTo('section-criteria'); }, 220);
 }
 
@@ -1410,18 +1544,37 @@ function doGenerate() {
     cr: cr, adv: adv
   };
 
+  setStep(4);
+  /* Show spinner and disable button */
+  var spin = document.getElementById('spinnerOverlay');
+  var genBtn = document.getElementById('generateBtn');
+  if (spin) spin.classList.add('active');
+  if (genBtn) { genBtn.classList.add('btn-generating'); genBtn.textContent = 'Generating…'; }
+
   var form = document.createElement('form');
   form.method = 'POST'; form.action = '/generate';
   var inp = document.createElement('input');
   inp.type = 'hidden'; inp.name = 'payload'; inp.value = JSON.stringify(payload);
-  form.appendChild(inp); document.body.appendChild(form); form.submit();
+  form.appendChild(inp); document.body.appendChild(form);
+  setTimeout(function(){ form.submit(); }, 120); /* brief delay so spinner renders */
 }
 
 function resetAll() {
   selT1=selT2=selMID=selMode=null;
+  lockedIds=[]; excludedIds=[];
   document.querySelectorAll('.match-card').forEach(function(c){ c.classList.remove('selected'); });
   document.querySelectorAll('.mode-card').forEach(function(c){ c.classList.remove('active'); });
-  document.getElementById('selInfo').style.display='none';
+  var info = document.getElementById('selInfo');
+  if (info) info.style.display='none';
+  var lock = document.getElementById('lock_picker');
+  var excl = document.getElementById('excl_picker');
+  if (lock) lock.innerHTML='<span class="chip-placeholder">Select a match first</span>';
+  if (excl) excl.innerHTML='<span class="chip-placeholder">Select a match first</span>';
+  var ls = document.getElementById('lock_summary');
+  var es = document.getElementById('excl_summary');
+  if (ls) ls.innerHTML=''; if (es) es.innerHTML='';
+  setStep(1);
+  showToast('🔄 Reset complete. Select a match to start.', '#4fa3e0');
 }
 </script>
 """ + _SHARED_JS + """
@@ -1442,18 +1595,27 @@ RESULTS_PAGE = """<!DOCTYPE html>
 </head>
 <body>
 
-<header>
+<header role="banner">
   <div class="logo-wrap">
-    <div class="logo">⚡ FantasyXI</div>
+    <div class="logo" aria-label="FantasyXI">⚡ FantasyXI</div>
     <span class="logo-badge">Super 8s · T20 WC 2026</span>
   </div>
-  <nav class="hdr-nav">
-    <a href="/">← Home</a>
-    <a href="/export_pdf" id="pdfBtn" {% if not unlocked %}style="display:none"{% endif %} class="cta">📄 PDF</a>
+  <nav class="hdr-nav" aria-label="Results navigation">
+    <a href="/" aria-label="Go back to home">← Home</a>
+    <a href="/export_pdf" id="pdfBtn" {% if not unlocked %}style="display:none"{% endif %} class="cta" aria-label="Export all teams as PDF">📄 PDF</a>
   </nav>
 </header>
 
-<div class="wrap z1">
+<!-- Success banner -->
+<div class="success-banner z1" role="status" aria-live="polite">
+  <span>✅</span>
+  <div>
+    <strong>{{teams|length}} Teams Generated Successfully!</strong>
+    <span class="success-sub">First 3 are free · Watch a short ad to unlock all {{teams|length - 3}} remaining teams</span>
+  </div>
+</div>
+
+<main class="wrap z1" aria-label="Generated teams results">
 
   <!-- Match strip -->
   <div class="match-strip">
@@ -1601,7 +1763,7 @@ RESULTS_PAGE = """<!DOCTYPE html>
   </div>
   {% endif %}
 
-</div><!-- /wrap -->
+</main><!-- /results -->
 
 """ + _FOOTER + _AD_MODAL + _SHARED_JS + """
 </body>
