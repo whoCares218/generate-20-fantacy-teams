@@ -1,6 +1,6 @@
 # =============================================================================
-# FantasyXI — ICC T20 World Cup 2026 Super 8s · Fantasy Team Generator
-# Single-file Flask app | Two JSON files only | AdSense-ready | v2.0
+# AI Fantasy Team Generator — Flask app | v3.2
+# Supports IPL, T20 World Cup, ICC tournaments, and all major cricket leagues
 # =============================================================================
 
 import json, random, hashlib, io, datetime
@@ -9,7 +9,7 @@ from flask import (Flask, render_template_string, request,
 from collections import defaultdict
 
 app = Flask(__name__)
-app.secret_key = "fantasyxi_t20wc_2026_sk_v2"
+app.secret_key = "fantasyxi_t20wc_2026_sk_v3"
 
 # ─── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -54,11 +54,14 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
     xi1, _ = get_xi(team1)
     xi2, _ = get_xi(team2)
 
-    # Apply lock/exclude filters
     locked_ids   = set(adv.get("locked", []))
     excluded_ids = set(adv.get("excluded", []))
     max_from_one = int(adv.get("max_from_one", 7))
-    exposure_pct = float(adv.get("exposure_pct", 75)) / 100.0  # default 75%
+    exposure_pct = float(adv.get("exposure_pct", 75)) / 100.0
+    risk_intensity = float(adv.get("risk_intensity", 1.0))
+    rand_strength  = float(adv.get("rand_strength", 0.5))
+    min_diff       = int(adv.get("min_diff", 0))
+    safe_core      = adv.get("safe_core", False)
 
     pool1 = [p for p in xi1 if p["id"] not in excluded_ids]
     pool2 = [p for p in xi2 if p["id"] not in excluded_ids]
@@ -93,11 +96,12 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
         out  = locked_players[:]
 
         if need > 0 and free_pool:
-            tries = random.choices(free_pool, weights=free_weights or [1]*len(free_pool),
-                                   k=min(len(free_pool), need * 5))
+            adj_weights = [w * (1 + rand_strength * (random.random() - 0.5)) for w in (free_weights or [1]*len(free_pool))]
+            adj_weights = [max(w, 0.01) for w in adj_weights]
+            tries = random.choices(free_pool, weights=adj_weights,
+                                   k=min(len(free_pool), need * 6))
             for p in tries:
                 if p["id"] not in seen:
-                    # exposure limit
                     if appear[p["id"]] >= int(nt * exposure_pct): continue
                     seen.append(p["id"]); out.append(p)
                 if len(out) == n: break
@@ -117,33 +121,42 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
             attempts += 1
             n1, n2 = (6, 5) if (cr.get("c1", True) and idx % 2 == 0) else (5, 6)
 
-            # Differential inclusion: occasionally swap weights
-            w1 = [risk_weight(p, mode) for p in pool1]
-            w2 = [risk_weight(p, mode) for p in pool2]
+            w1 = [risk_weight(p, mode) * risk_intensity for p in pool1]
+            w2 = [risk_weight(p, mode) * risk_intensity for p in pool2]
 
             if adv.get("differential", False) and idx >= 10:
-                # Boost lower-appearance players for diversity
                 w1 = [w * max(0.5, 1 - appear[p["id"]] / max(nt, 1)) for p, w in zip(pool1, w1)]
                 w2 = [w * max(0.5, 1 - appear[p["id"]] / max(nt, 1)) for p, w in zip(pool2, w2)]
 
+            if min_diff > 0 and idx >= 5:
+                low_appear1 = sorted(pool1, key=lambda p: appear[p["id"]])[:min_diff]
+                low_appear2 = sorted(pool2, key=lambda p: appear[p["id"]])[:min_diff]
+                for p in low_appear1 + low_appear2:
+                    locked_ids.add(p["id"])
+
             sel1 = pick_unique(pool1, w1, n1, locked_ids)
             sel2 = pick_unique(pool2, w2, n2, locked_ids)
+
+            if min_diff > 0 and idx >= 5:
+                for p in low_appear1 + low_appear2:
+                    locked_ids.discard(p["id"])
+                for lid in adv.get("locked", []):
+                    locked_ids.add(lid)
+
             if len(sel1) != n1 or len(sel2) != n2: continue
             players = sel1 + sel2
 
             if cr.get("c14", True) and not roles_ok(players): continue
 
-            # Max players from one team
             max_one = max_from_one if adv.get("max_from_one") else 7
             if cr.get("c13", True) and (len(sel1) > max_one or len(sel2) > max_one): continue
 
             h = hash_team([p["id"] for p in players])
             if cr.get("c12", True) and h in th_set: continue
 
-            # Captain selection
             cp = cap_pool(players)
             def cw(p):
-                b = risk_weight(p, mode)
+                b = risk_weight(p, mode) * risk_intensity
                 b /= (1 + cap_cnt[p["id"]] * 0.5)
                 return max(b, 0.05)
             cws = [cw(p) for p in cp]
@@ -165,7 +178,10 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
                     arc = [p for p in cp if p["role"] == "All-rounder"]
                     if arc: captain = random.choice(arc)
 
-            # Vice-captain selection
+            if safe_core and idx < 5:
+                low_risk = [p for p in cp if p.get("risk_level") == "Low"]
+                if low_risk: captain = sorted(low_risk, key=lambda p: cap_cnt[p["id"]])[0]
+
             vp = [p for p in players if p["id"] != captain["id"]]
             if not vp: continue
             def vw(p):
@@ -183,7 +199,6 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
             if cr.get("c6", True) and len(cv_pairs) < 5 and len(result) >= 5:
                 if cv in cv_pairs and attempts < 150: continue
 
-            # Unique C/VC per team (advanced)
             if adv.get("unique_cap", False):
                 if captain["id"] in [r.get("_cap_id") for r in result]: continue
             if adv.get("unique_vc", False):
@@ -209,645 +224,858 @@ def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
     return result, len(cap_cnt), len(cv_pairs)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ─── Shared CSS ───────────────────────────────────────────────────────────────
-# ═══════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+# ─── SHARED CSS ──────────────────────────────────────────────────────────────
+# =============================================================================
 
 _CSS = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#08090f">
+<meta name="theme-color" content="#060810">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#08090f;--s1:#0d0e1a;--s2:#111320;--s3:#161828;--s4:#1c2035;
-  --brd:#202438;--brd2:#2d3254;
-  --gld:#f0b429;--gld2:#d4950a;--gld-glow:rgba(240,180,41,.18);
-  --ora:#ff6b35;--grn:#10d48e;--blu:#4fa3e0;--red:#f04f4f;--pur:#9f7aea;
-  --txt:#dde3f0;--txt2:#8896b3;--txt3:#4a5578;
-  --r:12px;--r2:8px;
-  --shadow:0 4px 24px rgba(0,0,0,.5);
+/* ══════════════════════════════════════════════
+   DESIGN SYSTEM — Premium Dark Gold
+   Fonts: Barlow Condensed (display) + DM Sans (body)
+   ══════════════════════════════════════════════ */
+:root {
+  --bg:   #060810;
+  --s1:   #0b0e1c;
+  --s2:   #0f1220;
+  --s3:   #131728;
+  --s4:   #181c30;
+  --s5:   #1e2238;
+  --brd:  #1d2140;
+  --brd2: #2a3060;
+  --brd3: #374070;
+  --gld:      #f5c842;
+  --gld2:     #d4a212;
+  --gld3:     #fad96a;
+  --gld-glow: rgba(245,200,66,.15);
+  --gld-dim:  rgba(245,200,66,.08);
+  --ora: #ff7043;
+  --grn: #00e5a0;
+  --blu: #4db8ff;
+  --red: #ff4d6d;
+  --pur: #a78bfa;
+  --cyn: #22d3ee;
+  --txt:  #e2e8f8;
+  --txt2: #8896b8;
+  --txt3: #4a5578;
+  --txt4: #2d3555;
+  --r:  14px;
+  --r2: 10px;
+  --r3: 8px;
+  --shadow: 0 8px 32px rgba(0,0,0,.6);
+  --shadow2: 0 2px 12px rgba(0,0,0,.4);
+  --glow-gld: 0 0 30px rgba(245,200,66,.12), 0 0 60px rgba(245,200,66,.06);
+  /* Fixed bar heights */
+  --hdr-h:  58px;
+  --step-h: 52px;
 }
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{
-  font-family:'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif;
-  background:var(--bg);color:var(--txt);min-height:100vh;overflow-x:hidden;
-  font-size:15px;line-height:1.6;
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-size: 15px;
+  line-height: 1.65;
+  /* Push content below fixed header + fixed step bar */
+  padding-top: calc(var(--hdr-h) + var(--step-h));
 }
-/* Subtle grid background */
-body::before{
-  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background-image:
-    radial-gradient(ellipse 60% 40% at 50% -10%,rgba(240,180,41,.07),transparent),
-    linear-gradient(rgba(255,255,255,.012) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(255,255,255,.012) 1px,transparent 1px);
-  background-size:100%,48px 48px,48px 48px;
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(245,200,66,.05), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 85% 110%, rgba(77,184,255,.04), transparent 50%),
+    linear-gradient(rgba(255,255,255,.008) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.008) 1px, transparent 1px);
+  background-size: 100%, 100%, 56px 56px, 56px 56px;
 }
-.z1{position:relative;z-index:1;}
+.z1 { position: relative; z-index: 1; }
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar{width:6px;}
-::-webkit-scrollbar-track{background:var(--s1);}
-::-webkit-scrollbar-thumb{background:var(--brd2);border-radius:3px;}
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--s1); }
+::-webkit-scrollbar-thumb { background: var(--brd3); border-radius: 3px; }
 
-/* ── Header ── */
-header{
-  position:sticky;top:0;z-index:900;
-  background:rgba(8,9,15,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
-  border-bottom:1px solid var(--brd);
-  display:flex;align-items:center;gap:14px;padding:0 28px;height:52px;
+/* ══════════════════════════
+   HEADER — Fixed
+   ══════════════════════════ */
+header {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 900;
+  height: var(--hdr-h);
+  background: rgba(6,8,16,.97);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid var(--brd);
+  display: flex; align-items: center;
+  padding: 0 32px;
 }
-.logo-wrap{display:flex;align-items:center;gap:10px;}
-.logo{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.55rem;font-weight:800;letter-spacing:3px;
-  background:linear-gradient(135deg,var(--gld) 20%,var(--ora));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+.logo-wrap { display: flex; align-items: center; }
+.logo {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.25rem; font-weight: 800;
+  letter-spacing: 2px; white-space: nowrap;
+  background: linear-gradient(135deg, var(--gld3) 0%, var(--gld) 40%, var(--ora) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  text-decoration: none;
 }
-.logo-badge{
-  font-size:.55rem;color:var(--txt3);letter-spacing:1.5px;text-transform:uppercase;
-  background:var(--s3);border:1px solid var(--brd);padding:2px 7px;border-radius:4px;
+.logo-badge {
+  font-size: .56rem; color: var(--txt3); letter-spacing: 1.5px; text-transform: uppercase;
+  background: var(--s3); border: 1px solid var(--brd); padding: 3px 9px; border-radius: 6px;
 }
-.hdr-nav{margin-left:auto;display:flex;gap:3px;align-items:center;}
-.hdr-nav a{
-  color:var(--txt3);text-decoration:none;font-size:.75rem;font-weight:500;
-  padding:5px 11px;border-radius:6px;border:1px solid transparent;transition:all .18s;
+.hdr-nav { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.hdr-nav a {
+  color: var(--txt2); text-decoration: none; font-size: .82rem; font-weight: 500;
+  padding: 6px 14px; border-radius: 8px; border: 1px solid transparent;
+  transition: all .18s; letter-spacing: .2px;
 }
-.hdr-nav a:hover{border-color:var(--brd2);color:var(--txt);}
-.hdr-nav a.cta{
-  background:linear-gradient(135deg,var(--gld),var(--gld2));
-  color:#000;border-color:transparent;font-weight:700;
+.hdr-nav a:hover { color: var(--txt); background: var(--s2); border-color: var(--brd); }
+.hdr-nav a.cta {
+  background: linear-gradient(135deg, var(--gld), var(--gld2));
+  color: #000; border-color: transparent; font-weight: 700; letter-spacing: .8px;
+  margin-left: 8px; padding: 7px 18px;
 }
-.hdr-nav a.cta:hover{box-shadow:0 4px 14px var(--gld-glow);transform:translateY(-1px);}
-
-/* ── Compact hero (Part 5) ── */
-.hero{
-  padding:22px 20px 18px;text-align:center;
-  background:radial-gradient(ellipse 70% 50% at 50% -10%,rgba(240,180,41,.07),transparent);
-  border-bottom:1px solid var(--brd);
-}
-.hero h1{
-  font-family:'Barlow Condensed',sans-serif;font-weight:800;
-  font-size:clamp(1.6rem,3.8vw,2.6rem);
-  letter-spacing:3px;line-height:1.05;
-  background:linear-gradient(160deg,var(--gld),var(--ora) 80%);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-}
-.hero-meta{
-  display:flex;align-items:center;justify-content:center;gap:10px;
-  margin-top:7px;flex-wrap:wrap;
-}
-.hero-tag{font-size:.68rem;color:var(--txt3);letter-spacing:.8px;}
-.hero-sep{color:var(--brd2);font-size:.7rem;}
-.hero-pill{
-  background:rgba(240,180,41,.1);border:1px solid rgba(240,180,41,.22);
-  border-radius:100px;padding:2px 11px;font-size:.62rem;color:var(--gld);
-  letter-spacing:1px;text-transform:uppercase;font-weight:700;
+.hdr-nav a.cta:hover {
+  box-shadow: 0 4px 16px var(--gld-glow); transform: translateY(-1px);
 }
 
-/* ── Wrap ── */
-.wrap{max-width:1160px;margin:0 auto;padding:22px 18px 80px;}
+/* ══════════════════════════
+   STICKY STEP PROGRESS BAR
+   Fixed directly below header
+   ══════════════════════════ */
+.step-bar {
+  position: fixed;
+  top: var(--hdr-h);
+  left: 0; right: 0;
+  z-index: 850;
+  height: var(--step-h);
+  background: rgba(11,14,28,.98);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--brd);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 32px;
+}
+.step-bar-inner {
+  display: flex; align-items: center;
+  width: 100%; max-width: 680px;
+}
+.step {
+  display: flex; align-items: center; gap: 8px; flex: 1;
+}
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid var(--brd2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif; font-size: .75rem; font-weight: 800;
+  color: var(--txt3); flex-shrink: 0; transition: all .3s;
+}
+.step-lbl {
+  font-size: .7rem; color: var(--txt3); transition: color .3s;
+  white-space: nowrap; font-weight: 500;
+}
+.step-line {
+  flex: 1; height: 1px; background: var(--brd); margin: 0 6px;
+  transition: background .3s;
+}
+/* Done state */
+.step.done .step-num {
+  background: var(--grn); border-color: var(--grn); color: #000;
+}
+.step.done .step-lbl  { color: var(--grn); }
+.step.done .step-line { background: var(--grn); }
+/* Active state */
+.step.active .step-num {
+  background: var(--gld); border-color: var(--gld); color: #000;
+  box-shadow: 0 0 0 3px rgba(245,200,66,.22), 0 0 14px rgba(245,200,66,.18);
+}
+.step.active .step-lbl { color: var(--gld); font-weight: 600; }
 
-/* ── Section heading ── */
-.sh{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:2px;
-  color:var(--gld);margin-bottom:13px;display:flex;align-items:center;gap:10px;
-}
-.sh::after{content:'';flex:1;height:1px;background:linear-gradient(to right,var(--brd),transparent);}
-
-/* ── Tabs ── */
-.tab-bar{
-  display:flex;gap:2px;background:var(--s1);border:1px solid var(--brd);
-  border-radius:9px;padding:3px;width:fit-content;margin-bottom:18px;
-}
-.tab-btn{
-  padding:6px 16px;border-radius:6px;border:none;background:transparent;
-  color:var(--txt3);font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:500;
-  cursor:pointer;transition:all .18s;
-}
-.tab-btn.active{background:var(--s3);color:var(--txt);border:1px solid var(--brd2);}
-
-/* ── Match grid ── */
-.match-grid{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
-  gap:10px;margin-bottom:24px;
-}
-.match-card{
-  background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);
-  padding:15px 16px 13px;cursor:pointer;transition:all .2s;position:relative;overflow:hidden;
-}
-.match-card::before{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(135deg,rgba(240,180,41,.05),transparent 60%);
-  opacity:0;transition:opacity .2s;
-}
-.match-card:hover{border-color:rgba(240,180,41,.4);transform:translateY(-2px);box-shadow:var(--shadow);}
-.match-card:hover::before{opacity:1;}
-.match-card.selected{border-color:var(--gld);background:rgba(240,180,41,.05);box-shadow:0 0 0 1px var(--gld),var(--shadow);}
-.match-time{
-  position:absolute;top:10px;right:10px;
-  background:rgba(240,180,41,.12);border:1px solid rgba(240,180,41,.22);
-  color:var(--gld);font-size:.56rem;font-weight:700;padding:2px 7px;border-radius:100px;
-}
-.match-id-tag{font-size:.6rem;color:var(--txt3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;}
-.match-vs{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.5rem;font-weight:700;letter-spacing:1px;
-  text-align:center;line-height:1;
-}
-.match-vs em{color:var(--gld);font-style:normal;margin:0 7px;font-size:.85rem;font-weight:400;}
-.match-venue{font-size:.63rem;color:var(--txt3);text-align:center;margin-top:5px;}
-
-/* ── Mode cards ── */
-.mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px;}
-@media(max-width:560px){.mode-grid{grid-template-columns:1fr;}}
-.mode-card{
-  border-radius:var(--r);padding:18px 14px;text-align:center;
-  cursor:pointer;border:2px solid transparent;transition:all .22s;position:relative;overflow:hidden;
-}
-.mode-card::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .22s;
-  background:radial-gradient(ellipse at top,rgba(255,255,255,.04),transparent);}
-.mode-card:hover::after{opacity:1;}
-.mode-card.safe{background:linear-gradient(145deg,#05120e,#071510);border-color:rgba(16,212,142,.2);}
-.mode-card.balanced{background:linear-gradient(145deg,#05101e,#071525);border-color:rgba(79,163,224,.2);}
-.mode-card.risky{background:linear-gradient(145deg,#140508,#1a0608);border-color:rgba(240,79,79,.2);}
-.mode-card:hover{transform:translateY(-3px);}
-.mode-card.active.safe{border-color:var(--grn);box-shadow:0 0 30px rgba(16,212,142,.15);}
-.mode-card.active.balanced{border-color:var(--blu);box-shadow:0 0 30px rgba(79,163,224,.15);}
-.mode-card.active.risky{border-color:var(--red);box-shadow:0 0 30px rgba(240,79,79,.15);}
-.mode-icon{font-size:1.8rem;margin-bottom:7px;}
-.mode-name{font-family:'Barlow Condensed',sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:2px;}
-.mode-card.safe .mode-name{color:var(--grn);}
-.mode-card.balanced .mode-name{color:var(--blu);}
-.mode-card.risky .mode-name{color:var(--red);}
-.mode-desc{font-size:.68rem;color:var(--txt3);margin-top:4px;line-height:1.45;}
-.mode-note{font-size:.6rem;margin-top:6px;padding:2px 8px;border-radius:5px;display:inline-block;font-weight:600;}
-.mode-card.safe .mode-note{background:rgba(16,212,142,.1);color:var(--grn);}
-.mode-card.balanced .mode-note{background:rgba(79,163,224,.1);color:var(--blu);}
-.mode-card.risky .mode-note{background:rgba(240,79,79,.1);color:var(--red);}
-
-/* ── Advanced Criteria (Part 3) ── */
-.adv-section{background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);padding:20px;margin-bottom:22px;}
-.adv-group{margin-bottom:18px;}
-.adv-group:last-child{margin-bottom:0;}
-.adv-group-title{
-  font-family:'Barlow Condensed',sans-serif;font-size:.85rem;font-weight:700;letter-spacing:1.5px;
-  color:var(--txt3);text-transform:uppercase;margin-bottom:10px;
-  padding-bottom:6px;border-bottom:1px solid var(--brd);
-}
-.crit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:6px;}
-.crit-item{
-  background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);
-  padding:8px 12px;display:flex;align-items:flex-start;gap:9px;cursor:pointer;
-  transition:border-color .16s,background .16s;
-}
-.crit-item:hover{border-color:rgba(240,180,41,.3);background:var(--s4);}
-.crit-item input[type="checkbox"]{
-  accent-color:var(--gld);width:14px;height:14px;flex-shrink:0;cursor:pointer;margin-top:2px;
-}
-.crit-item label{font-size:.72rem;color:var(--txt);cursor:pointer;line-height:1.35;user-select:none;}
-
-/* Inputs row */
-.input-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
-.input-group{flex:1;min-width:130px;display:flex;flex-direction:column;gap:5px;}
-.input-group label{font-size:.63rem;color:var(--txt3);letter-spacing:.9px;text-transform:uppercase;font-weight:600;}
-.input-group input,.input-group select{
-  background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);
-  padding:8px 11px;color:var(--txt);font-size:.82rem;
-  font-family:'DM Sans',sans-serif;width:100%;transition:border-color .16s;outline:none;
-}
-.input-group input:focus,.input-group select:focus{
-  border-color:rgba(240,180,41,.45);box-shadow:0 0 0 3px rgba(240,180,41,.07);
+@media(max-width:500px) {
+  .step-lbl { display: none; }
+  .step-line { margin: 0 3px; }
+  .step-bar  { padding: 0 16px; }
 }
 
-/* ── Buttons ── */
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 22px;
-  border-radius:var(--r2);border:none;cursor:pointer;
-  font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:700;letter-spacing:1.5px;
-  text-decoration:none;transition:all .2s;white-space:nowrap;
-}
-.btn-gold{background:linear-gradient(135deg,var(--gld),var(--gld2));color:#000;}
-.btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 22px var(--gld-glow);}
-.btn-ora{background:linear-gradient(135deg,var(--ora),#d84000);color:#fff;}
-.btn-ora:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(255,107,53,.3);}
-.btn-grn{background:linear-gradient(135deg,var(--grn),#0aad74);color:#000;}
-.btn-grn:hover{transform:translateY(-2px);box-shadow:0 8px 22px rgba(16,212,142,.25);}
-.btn-ghost{background:transparent;color:var(--txt3);border:1px solid var(--brd);}
-.btn-ghost:hover{border-color:var(--brd2);color:var(--txt);}
-.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:28px;align-items:center;}
-.btn-lg{padding:13px 30px;font-size:1.1rem;border-radius:10px;}
+/* ══════════════════════════
+   LAYOUT
+   ══════════════════════════ */
+.wrap { max-width: 1200px; margin: 0 auto; padding: 26px 20px 90px; }
 
-/* Alert */
-.alert-sel{
-  background:rgba(240,180,41,.07);border:1px solid rgba(240,180,41,.22);
-  border-radius:var(--r2);padding:9px 13px;font-size:.78rem;color:var(--txt2);
-  margin-bottom:14px;display:none;
+.sh {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700;
+  letter-spacing: 2.5px; text-transform: uppercase;
+  color: var(--gld); margin-bottom: 16px;
+  display: flex; align-items: center; gap: 12px;
 }
+.sh::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--brd2), transparent);
+}
+.sh small { font-size: .62rem; color: var(--txt3); letter-spacing: 1px; font-weight: 400; }
 
-.divider{height:1px;background:var(--brd);margin:22px 0;}
-
-/* ── Results: match strip ── */
-.match-strip{
-  background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);
-  padding:14px 20px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+.tab-bar {
+  display: flex; gap: 3px; background: var(--s1); border: 1px solid var(--brd);
+  border-radius: 11px; padding: 4px; width: fit-content; margin-bottom: 20px;
 }
-.strip-vs{font-family:'Barlow Condensed',sans-serif;font-size:1.5rem;font-weight:700;letter-spacing:1.5px;line-height:1;}
-.strip-vs em{color:var(--gld);font-style:normal;margin:0 8px;}
-.strip-venue{font-size:.65rem;color:var(--txt3);margin-top:3px;}
-.strip-right{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
-.pill{padding:3px 11px;border-radius:100px;font-size:.66rem;font-weight:700;
-  text-transform:uppercase;letter-spacing:.8px;border:1px solid transparent;}
-.pill-safe{background:rgba(16,212,142,.1);color:var(--grn);border-color:rgba(16,212,142,.22);}
-.pill-balanced{background:rgba(79,163,224,.1);color:var(--blu);border-color:rgba(79,163,224,.22);}
-.pill-risky{background:rgba(240,79,79,.1);color:var(--red);border-color:rgba(240,79,79,.22);}
-.pill-neutral{background:var(--s3);color:var(--txt3);border-color:var(--brd);}
-
-/* Stats bar */
-.stats-bar{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:18px;}
-.stat-chip{background:var(--s2);border:1px solid var(--brd);border-radius:10px;padding:8px 15px;text-align:center;}
-.stat-chip strong{display:block;font-size:1.05rem;font-weight:700;color:var(--gld);line-height:1;}
-.stat-chip span{font-size:.6rem;color:var(--txt3);text-transform:uppercase;letter-spacing:.5px;}
-
-/* ── Team grid ── */
-.res-topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;}
-.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;}
-
-.team-card{
-  background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);
-  overflow:hidden;position:relative;transition:border-color .18s,transform .2s,box-shadow .2s;
+.tab-btn {
+  padding: 7px 18px; border-radius: 8px; border: none; background: transparent;
+  color: var(--txt3); font-family: 'DM Sans', sans-serif; font-size: .8rem; font-weight: 500;
+  cursor: pointer; transition: all .2s; letter-spacing: .3px;
 }
-.team-card:hover{border-color:var(--brd2);transform:translateY(-1px);box-shadow:var(--shadow);}
-
-.team-hdr{
-  background:linear-gradient(135deg,#0d1525,#0a1020);
-  padding:10px 14px;display:flex;justify-content:space-between;align-items:center;
-  border-bottom:1px solid var(--brd);
-}
-.team-num{font-family:'Barlow Condensed',sans-serif;font-size:.92rem;font-weight:700;color:var(--gld);letter-spacing:2px;}
-.badge{font-size:.56rem;font-weight:700;padding:2px 8px;border-radius:100px;letter-spacing:.8px;text-transform:uppercase;}
-.badge-free{background:var(--grn);color:#000;}
-.badge-lock{background:var(--s4);color:var(--txt3);border:1px solid var(--brd2);}
-
-.cv-row{display:flex;gap:6px;padding:10px 12px 0;}
-.cv-pill{flex:1;background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);padding:6px 8px;text-align:center;}
-.cv-lbl{display:block;font-size:.56rem;color:var(--txt3);letter-spacing:.4px;text-transform:uppercase;font-weight:600;margin-bottom:2px;}
-.cv-nm{font-size:.75rem;font-weight:600;display:block;line-height:1.25;}
-.cv-c .cv-nm{color:var(--gld);}
-.cv-vc .cv-nm{color:var(--blu);}
-
-.plist{list-style:none;padding:8px 12px 0;}
-.pitem{
-  display:flex;align-items:center;gap:6px;
-  padding:4.5px 0;border-bottom:1px solid rgba(32,36,56,.8);font-size:.73rem;
-}
-.pitem:last-child{border-bottom:none;}
-.rdot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
-.d-bat{background:var(--blu);}.d-bowl{background:var(--ora);}
-.d-ar{background:var(--grn);}.d-wk{background:var(--gld);}
-.pname{flex:1;color:var(--txt);}
-.ct{color:var(--gld);font-size:.6rem;font-weight:700;margin-left:3px;}
-.vct{color:var(--blu);font-size:.6rem;font-weight:700;margin-left:3px;}
-.rtag{font-size:.56rem;font-weight:600;padding:1px 6px;border-radius:5px;flex-shrink:0;}
-.rL{background:rgba(16,212,142,.1);color:var(--grn);}
-.rM{background:rgba(79,163,224,.1);color:var(--blu);}
-.rH{background:rgba(240,79,79,.1);color:var(--red);}
-
-.card-foot{
-  padding:8px 12px;border-top:1px solid var(--brd);margin-top:8px;
-  display:flex;justify-content:space-between;align-items:center;
-}
-.foot-info{font-size:.6rem;color:var(--txt3);}
-.copy-btn{
-  background:none;border:1px solid var(--brd);color:var(--txt3);
-  font-size:.65rem;padding:3px 10px;border-radius:5px;cursor:pointer;
-  transition:all .16s;font-family:'DM Sans',sans-serif;font-weight:500;
-}
-.copy-btn:hover:not(:disabled){border-color:var(--gld);color:var(--gld);}
-.copy-btn:disabled{opacity:.22;cursor:default;}
-
-/* ── Lock overlay ── */
-.lock-ov{
-  position:absolute;inset:0;background:rgba(8,9,15,.85);
-  backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);
-  border-radius:var(--r);z-index:20;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
-}
-.lock-ico{font-size:1.8rem;}.lock-lbl{font-family:'Barlow Condensed',sans-serif;font-size:.95rem;font-weight:700;letter-spacing:2px;color:var(--txt3);}
-.lock-sub{font-size:.6rem;color:var(--txt3);}
-
-/* ── PART 1: Unlock Banner — placed AFTER first 3, BEFORE locked teams ── */
-.unlock-banner{
-  background:linear-gradient(135deg,rgba(17,13,2,.9),rgba(26,20,4,.9));
-  border:2px solid rgba(240,180,41,.28);border-radius:14px;
-  padding:24px 28px;text-align:center;
-  position:relative;overflow:hidden;
-  grid-column:1/-1;  /* span full grid width */
-}
-.unlock-banner::before{
-  content:'';position:absolute;inset:0;
-  background:radial-gradient(ellipse at top,rgba(240,180,41,.06),transparent 70%);
-  pointer-events:none;
-}
-.unlock-banner h3{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.55rem;font-weight:800;letter-spacing:2px;
-  color:var(--gld);margin-bottom:4px;position:relative;
-}
-.unlock-banner p{color:var(--txt3);font-size:.78rem;margin-bottom:14px;position:relative;}
-.unlock-banner .btn{position:relative;}
-
-/* ── Ad Modal (Part 2 — FIXED) ── */
-.modal-bg{
-  position:fixed;inset:0;background:rgba(0,0,0,.94);z-index:9000;
-  display:flex;align-items:center;justify-content:center;
-  opacity:0;pointer-events:none;transition:opacity .25s;
-}
-.modal-bg.open{opacity:1;pointer-events:all;}
-.modal-box{
-  background:var(--s2);border:2px solid rgba(240,180,41,.28);border-radius:16px;
-  padding:32px 36px;max-width:390px;width:92%;text-align:center;
-  transform:scale(.95);transition:transform .25s;
-}
-.modal-bg.open .modal-box{transform:scale(1);}
-.modal-box h2{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.7rem;font-weight:800;letter-spacing:2px;
-  color:var(--gld);margin-bottom:5px;
-}
-.modal-box > p{color:var(--txt3);font-size:.78rem;margin-bottom:16px;}
-.ad-box{
-  background:var(--s1);border:2px dashed var(--brd2);border-radius:11px;
-  padding:22px 18px;margin:16px 0;
-}
-.ad-icon{font-size:2.4rem;margin-bottom:6px;}
-.ad-label{font-size:.83rem;color:var(--txt2);font-weight:600;}
-.ad-sub{font-size:.66rem;color:var(--txt3);margin-top:2px;}
-.ad-prog{height:6px;background:var(--brd);border-radius:100px;overflow:hidden;margin-top:14px;}
-.ad-bar{height:100%;background:linear-gradient(90deg,var(--ora),var(--gld));border-radius:100px;width:0%;transition:width .08s linear;}
-.ad-tmr{font-size:1.1rem;font-weight:700;color:var(--ora);margin-top:10px;letter-spacing:1px;}
-.modal-close-note{font-size:.65rem;color:var(--txt3);margin-top:10px;}
-
-/* Toast */
-.toast{
-  position:fixed;bottom:22px;right:22px;z-index:9999;
-  padding:10px 18px;border-radius:9px;font-size:.78rem;font-weight:600;
-  transform:translateY(50px);opacity:0;transition:all .28s;pointer-events:none;
-  box-shadow:var(--shadow);
-}
-.toast.show{transform:translateY(0);opacity:1;}
-
-/* ── Content sections ── */
-.content-section{max-width:820px;margin:44px auto 0;padding:0 18px;}
-.content-section h2{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-weight:700;letter-spacing:2px;
-  color:var(--gld);margin-bottom:13px;
-}
-.content-section h3{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.05rem;font-weight:700;letter-spacing:1.5px;
-  color:var(--txt);margin:18px 0 7px;
-}
-.content-section p{color:var(--txt2);font-size:.87rem;line-height:1.7;margin-bottom:11px;}
-.content-section ul,.content-section ol{
-  color:var(--txt2);font-size:.87rem;line-height:1.7;padding-left:1.4em;margin-bottom:11px;
-}
-.content-section li{margin-bottom:5px;}
-.content-section a{color:var(--gld);text-decoration:none;}
-.content-section a:hover{text-decoration:underline;}
-
-/* FAQ */
-.faq-item{
-  background:var(--s2);border:1px solid var(--brd);border-radius:10px;
-  margin-bottom:7px;overflow:hidden;
-}
-.faq-q{
-  padding:12px 15px;cursor:pointer;font-size:.83rem;font-weight:600;
-  color:var(--txt);display:flex;justify-content:space-between;align-items:center;
-  transition:background .16s;
-}
-.faq-q:hover{background:var(--s3);}
-.faq-q .arrow{color:var(--gld);font-size:1rem;transition:transform .2s;flex-shrink:0;margin-left:12px;}
-.faq-q.open .arrow{transform:rotate(180deg);}
-.faq-a{
-  padding:0 15px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s;
-  font-size:.8rem;color:var(--txt2);line-height:1.65;
-}
-.faq-a.open{max-height:350px;padding:0 15px 13px;}
-
-/* Footer */
-footer{
-  background:var(--s1);border-top:1px solid var(--brd);
-  padding:32px 28px 22px;margin-top:56px;
-}
-.footer-grid{
-  max-width:1160px;margin:0 auto;
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:24px;
-  margin-bottom:24px;
-}
-.footer-col h4{
-  font-family:'Barlow Condensed',sans-serif;font-size:.95rem;font-weight:700;letter-spacing:1.5px;
-  color:var(--gld);margin-bottom:9px;
-}
-.footer-col p,.footer-col a{
-  font-size:.73rem;color:var(--txt3);display:block;margin-bottom:4px;
-  text-decoration:none;transition:color .16s;line-height:1.5;
-}
-.footer-col a:hover{color:var(--txt);}
-.footer-bottom{
-  max-width:1160px;margin:0 auto;padding-top:18px;
-  border-top:1px solid var(--brd);
-  display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:9px;
-}
-.footer-bottom p{font-size:.68rem;color:var(--txt3);}
-.footer-disclaimer{
-  font-size:.66rem;color:var(--txt3);line-height:1.5;
-  max-width:1160px;margin:14px auto 0;text-align:center;
+.tab-btn.active {
+  background: var(--s3); color: var(--txt); border: 1px solid var(--brd2);
+  box-shadow: var(--shadow2);
 }
 
-/* Legal pages */
-.legal-wrap{max-width:800px;margin:0 auto;padding:38px 20px 80px;}
-.legal-wrap h1{
-  font-family:'Barlow Condensed',sans-serif;font-size:1.9rem;font-weight:800;letter-spacing:3px;
-  color:var(--gld);margin-bottom:5px;
+.match-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+  gap: 10px; margin-bottom: 26px;
 }
-.legal-wrap .last-updated{font-size:.7rem;color:var(--txt3);margin-bottom:26px;}
-.legal-wrap h2{font-size:1rem;font-weight:700;color:var(--txt);margin:22px 0 7px;}
-.legal-wrap p{font-size:.84rem;color:var(--txt2);line-height:1.7;margin-bottom:11px;}
-.legal-wrap ul{font-size:.84rem;color:var(--txt2);line-height:1.7;padding-left:1.4em;margin-bottom:11px;}
-.legal-wrap li{margin-bottom:4px;}
-.legal-wrap a{color:var(--gld);text-decoration:none;}
-
-/* Contact form */
-.contact-form{display:flex;flex-direction:column;gap:13px;max-width:540px;}
-.form-group{display:flex;flex-direction:column;gap:5px;}
-.form-group label{font-size:.7rem;color:var(--txt3);letter-spacing:.8px;text-transform:uppercase;font-weight:600;}
-.form-group input,.form-group textarea,.form-group select{
-  background:var(--s2);border:1px solid var(--brd);border-radius:var(--r2);
-  padding:9px 12px;color:var(--txt);font-size:.83rem;font-family:'DM Sans',sans-serif;
-  outline:none;transition:border-color .16s;
+.match-card {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r);
+  padding: 16px 18px 14px; cursor: pointer; transition: all .22s;
+  position: relative; overflow: hidden;
 }
-.form-group input:focus,.form-group textarea:focus{
-  border-color:rgba(240,180,41,.45);box-shadow:0 0 0 3px rgba(240,180,41,.07);
+.match-card::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(245,200,66,.04), transparent 60%);
+  opacity: 0; transition: opacity .22s;
 }
-.form-group textarea{resize:vertical;min-height:110px;}
-.form-msg{background:rgba(16,212,142,.1);border:1px solid rgba(16,212,142,.28);border-radius:var(--r2);padding:11px 15px;font-size:.8rem;color:var(--grn);display:none;}
-
-/* About cards */
-.about-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin:18px 0;}
-.about-card{background:var(--s2);border:1px solid var(--brd);border-radius:var(--r);padding:18px 15px;text-align:center;}
-.about-icon{font-size:2rem;margin-bottom:9px;}
-.about-card h3{font-size:.88rem;font-weight:700;color:var(--txt);margin-bottom:5px;}
-.about-card p{font-size:.74rem;color:var(--txt3);line-height:1.5;}
-
-/* Age bar */
-.age-bar{
-  background:rgba(240,79,79,.08);border:1px solid rgba(240,79,79,.2);
-  border-radius:var(--r2);padding:7px 13px;font-size:.72rem;color:var(--red);
-  text-align:center;margin-bottom:14px;
+.match-card:hover { border-color: rgba(245,200,66,.45); transform: translateY(-3px); box-shadow: var(--shadow); }
+.match-card:hover::before { opacity: 1; }
+.match-card.selected {
+  border-color: var(--gld); background: var(--gld-dim);
+  box-shadow: 0 0 0 1px var(--gld), var(--shadow);
 }
-
-/* Section spacing helpers */
-.mb-4{margin-bottom:16px;} .mb-6{margin-bottom:24px;} .mt-4{margin-top:16px;}
-
-/* Animations */
-@keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
-.fade-up{animation:fadeUp .35s ease both;}
-
-/* Success banner on results page */
-.success-banner{
-  background:linear-gradient(135deg,rgba(16,212,142,.08),rgba(16,212,142,.04));
-  border-bottom:1px solid rgba(16,212,142,.2);
-  padding:10px 28px;display:flex;align-items:center;gap:12px;
-  font-size:.8rem;color:var(--txt2);
+.match-time {
+  position: absolute; top: 10px; right: 10px;
+  background: rgba(245,200,66,.1); border: 1px solid rgba(245,200,66,.2);
+  color: var(--gld); font-size: .58rem; font-weight: 700;
+  padding: 2px 8px; border-radius: 100px; letter-spacing: .8px;
 }
-.success-banner strong{color:var(--grn);display:block;font-size:.85rem;margin-bottom:1px;}
-.success-sub{font-size:.72rem;color:var(--txt3);}
-@media(max-width:480px){.success-banner{padding:9px 14px;font-size:.74rem;}}
-
-/* Focus ring for keyboard nav */
-:focus-visible{outline:2px solid var(--gld);outline-offset:2px;border-radius:4px;}
-button:focus-visible,a:focus-visible{outline:2px solid var(--gld);outline-offset:3px;}
-
-/* Smoother card transitions */
-.team-card,.match-card,.mode-card,.crit-item{will-change:transform;}
-
-/* Nav mobile collapse */
-@media(max-width:600px){
-  .hdr-nav a:not(.cta){display:none;}
-  .logo-badge{display:none;}
+.match-id-tag { font-size: .6rem; color: var(--txt3); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 8px; }
+.match-vs {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.45rem; font-weight: 800;
+  letter-spacing: 1px; text-align: center; line-height: 1.1;
 }
+.match-vs em { color: var(--gld); font-style: normal; margin: 0 8px; font-size: .85rem; font-weight: 400; }
+.match-venue { font-size: .63rem; color: var(--txt3); text-align: center; margin-top: 6px; }
 
-/* Print */
-@media print{
-  header,nav,.unlock-banner,.btn,.copy-btn,.lock-ov,.modal-bg,.toast,footer,
-  .content-section,.tab-bar,.age-bar{display:none!important;}
-  body{background:#fff;color:#000;}
-  .team-card{border:1px solid #ccc;break-inside:avoid;background:#fff;}
-  .team-hdr{background:#f5f5f5;}
-  .pname{color:#000;}.cv-nm{color:#b8860b!important;}
+.mode-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 26px; }
+@media(max-width:580px) { .mode-grid { grid-template-columns:1fr; } }
+.mode-card {
+  border-radius: var(--r); padding: 22px 16px; text-align: center;
+  cursor: pointer; border: 2px solid transparent; transition: all .25s;
+  position: relative; overflow: hidden;
 }
+.mode-card::after {
+  content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity .25s;
+  background: radial-gradient(ellipse at top, rgba(255,255,255,.04), transparent);
+}
+.mode-card:hover::after { opacity: 1; }
+.mode-card.safe    { background: linear-gradient(145deg,#04110d,#051410); border-color: rgba(0,229,160,.18); }
+.mode-card.balanced{ background: linear-gradient(145deg,#040f1e,#060f1e); border-color: rgba(77,184,255,.18); }
+.mode-card.risky   { background: linear-gradient(145deg,#130408,#170508); border-color: rgba(255,77,109,.18); }
+.mode-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+.mode-card.active.safe    { border-color: var(--grn); box-shadow: 0 0 40px rgba(0,229,160,.12); }
+.mode-card.active.balanced{ border-color: var(--blu); box-shadow: 0 0 40px rgba(77,184,255,.12); }
+.mode-card.active.risky   { border-color: var(--red); box-shadow: 0 0 40px rgba(255,77,109,.12); }
+.mode-icon { font-size: 2rem; margin-bottom: 9px; }
+.mode-name {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 800; letter-spacing: 2px;
+}
+.mode-card.safe     .mode-name { color: var(--grn); }
+.mode-card.balanced .mode-name { color: var(--blu); }
+.mode-card.risky    .mode-name { color: var(--red); }
+.mode-desc { font-size: .7rem; color: var(--txt3); margin-top: 5px; line-height: 1.5; }
+.mode-note {
+  font-size: .62rem; margin-top: 8px; padding: 3px 10px; border-radius: 6px;
+  display: inline-block; font-weight: 700; letter-spacing: .5px;
+}
+.mode-card.safe     .mode-note { background: rgba(0,229,160,.1);   color: var(--grn); }
+.mode-card.balanced .mode-note { background: rgba(77,184,255,.1);  color: var(--blu); }
+.mode-card.risky    .mode-note { background: rgba(255,77,109,.1);  color: var(--red); }
 
-/* Mobile */
-@media(max-width:480px){
-  header{padding:0 14px;}
-  .wrap{padding:16px 12px 60px;}
-  .match-grid{grid-template-columns:1fr;}
-  .mode-grid{grid-template-columns:1fr;}
-  .input-row{flex-direction:column;}
-  .team-grid{grid-template-columns:1fr;}
-  .modal-box{padding:24px 20px;}
+.adv-section {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r);
+  overflow: hidden; margin-bottom: 24px;
 }
-/* Skip link for accessibility */
-.skip-link{
-  position:absolute;top:-50px;left:18px;z-index:9999;
-  background:var(--gld);color:#000;padding:8px 16px;border-radius:0 0 8px 8px;
-  font-size:.8rem;font-weight:700;text-decoration:none;transition:top .2s;
+.adv-header {
+  background: var(--s1); border-bottom: 1px solid var(--brd);
+  padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
 }
-.skip-link:focus{top:0;}
+.adv-header-title {
+  font-family: 'Barlow Condensed', sans-serif; font-size: .9rem; font-weight: 700;
+  letter-spacing: 1.5px; color: var(--txt);
+}
+.adv-header-arrow { color: var(--gld); transition: transform .25s; font-size: 1.1rem; }
+.adv-header-arrow.open { transform: rotate(180deg); }
+.adv-body { padding: 20px; }
 
-/* Loading spinner */
-.spinner-overlay{
-  position:fixed;inset:0;background:rgba(8,9,15,.92);z-index:8000;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
-  opacity:0;pointer-events:none;transition:opacity .25s;
+.adv-group { margin-bottom: 22px; }
+.adv-group:last-child { margin-bottom: 0; }
+.adv-group-title {
+  font-family: 'Barlow Condensed', sans-serif; font-size: .72rem; font-weight: 700; letter-spacing: 2px;
+  color: var(--txt3); text-transform: uppercase; margin-bottom: 12px;
+  padding-bottom: 7px; border-bottom: 1px solid var(--brd);
+  display: flex; align-items: center; gap: 8px;
 }
-.spinner-overlay.active{opacity:1;pointer-events:all;}
-.spinner{width:52px;height:52px;border:4px solid var(--brd2);
-  border-top-color:var(--gld);border-radius:50%;animation:spin .8s linear infinite;}
-@keyframes spin{to{transform:rotate(360deg);}}
-.spinner-text{font-family:"Barlow Condensed",sans-serif;font-size:1.3rem;font-weight:700;
-  letter-spacing:2px;color:var(--gld);}
-.spinner-sub{font-size:.75rem;color:var(--txt3);}
-
-/* Generate button loading state */
-.btn-generating{opacity:.7;cursor:not-allowed;pointer-events:none;}
-.btn-generating::after{
-  content:"";display:inline-block;width:14px;height:14px;margin-left:8px;
-  border:2px solid rgba(0,0,0,.3);border-top-color:#000;
-  border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;
+.adv-group-title span {
+  background: var(--s3); border: 1px solid var(--brd2); border-radius: 5px;
+  padding: 1px 8px; font-size: .6rem; color: var(--gld); letter-spacing: .8px;
 }
 
-/* Step progress indicator */
-.step-bar{display:flex;align-items:center;gap:0;margin-bottom:20px;width:100%;}
-.step{display:flex;align-items:center;gap:7px;flex:1;}
-.step-num{
-  width:26px;height:26px;border-radius:50%;border:2px solid var(--brd2);
-  display:flex;align-items:center;justify-content:center;
-  font-size:.72rem;font-weight:700;color:var(--txt3);flex-shrink:0;transition:all .25s;
+.crit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 7px; }
+.crit-item {
+  background: var(--s3); border: 1px solid var(--brd); border-radius: var(--r3);
+  padding: 9px 13px; display: flex; align-items: flex-start; gap: 10px;
+  cursor: pointer; transition: border-color .16s, background .16s;
+  user-select: none;
 }
-.step-lbl{font-size:.68rem;color:var(--txt3);transition:color .25s;white-space:nowrap;}
-.step-line{flex:1;height:1px;background:var(--brd);margin:0 4px;transition:background .25s;}
-.step.done .step-num{background:var(--grn);border-color:var(--grn);color:#000;}
-.step.done .step-lbl{color:var(--grn);}
-.step.done .step-line{background:var(--grn);}
-.step.active .step-num{background:var(--gld);border-color:var(--gld);color:#000;}
-.step.active .step-lbl{color:var(--gld);}
-@media(max-width:480px){.step-lbl{display:none;}.step-line{margin:0 2px;}}
+.crit-item:hover { border-color: rgba(245,200,66,.35); background: var(--s4); }
+.crit-item:has(input:checked) {
+  border-color: rgba(245,200,66,.4); background: var(--gld-dim);
+}
+.crit-item input[type="checkbox"] {
+  accent-color: var(--gld); width: 15px; height: 15px; flex-shrink: 0;
+  cursor: pointer; margin-top: 2px;
+}
+.crit-label { font-size: .73rem; color: var(--txt); cursor: pointer; line-height: 1.4; }
+.crit-label small { display: block; color: var(--txt3); font-size: .62rem; margin-top: 1px; }
 
-/* Chip picker — click-to-toggle player selector */
-.chip-picker{
-  background:var(--s3);border:1px solid var(--brd);border-radius:var(--r2);
-  padding:10px;min-height:80px;
+.slider-group { display: flex; flex-direction: column; gap: 6px; }
+.slider-group label {
+  font-size: .65rem; color: var(--txt3); letter-spacing: 1px; text-transform: uppercase; font-weight: 600;
+  display: flex; justify-content: space-between; align-items: center;
 }
-.chip-placeholder{font-size:.72rem;color:var(--txt3);font-style:italic;}
-.chip-team-lbl{
-  font-size:.6rem;font-weight:700;color:var(--txt3);letter-spacing:1px;
-  text-transform:uppercase;margin:8px 0 5px;
+.slider-group label span { color: var(--gld); font-weight: 700; font-size: .72rem; }
+input[type="range"] {
+  width: 100%; accent-color: var(--gld); height: 4px; cursor: pointer;
 }
-.chip-team-lbl:first-child{margin-top:0;}
-.chip-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;}
-.pchip{
-  display:inline-flex;align-items:center;gap:5px;
-  background:var(--s4);border:1px solid var(--brd2);border-radius:6px;
-  padding:5px 10px;cursor:pointer;transition:all .15s;
-  font-family:'DM Sans',sans-serif;user-select:none;
+
+.input-row { display: flex; gap: 13px; flex-wrap: wrap; margin-bottom: 18px; }
+.input-group { flex: 1; min-width: 130px; display: flex; flex-direction: column; gap: 6px; }
+.input-group label {
+  font-size: .63rem; color: var(--txt3); letter-spacing: 1px; text-transform: uppercase; font-weight: 600;
 }
-.pchip:hover{border-color:rgba(240,180,41,.5);background:rgba(240,180,41,.07);}
-.pchip--active{background:rgba(240,180,41,.14);border-color:var(--gld);box-shadow:0 0 0 1px var(--gld);}
-.pchip--active-excl{background:rgba(240,79,79,.14);border-color:var(--red);box-shadow:0 0 0 1px var(--red);}
-.pchip-name{font-size:.72rem;color:var(--txt);font-weight:500;line-height:1;}
-.pchip-role{font-size:.57rem;color:var(--txt3);background:var(--s1);border-radius:4px;padding:1px 5px;line-height:1.4;}
-.pchip--active .pchip-name{color:var(--gld);}
-.pchip--active .pchip-role{color:var(--gld);background:rgba(240,180,41,.1);}
-.pchip--active-excl .pchip-name{color:var(--red);}
-.pchip--active-excl .pchip-role{color:var(--red);background:rgba(240,79,79,.1);}
-.chip-summary{font-size:.69rem;margin-top:7px;min-height:18px;line-height:1.5;}
+.input-group input, .input-group select {
+  background: var(--s3); border: 1px solid var(--brd); border-radius: var(--r3);
+  padding: 9px 12px; color: var(--txt); font-size: .83rem;
+  font-family: 'DM Sans', sans-serif; width: 100%; transition: border-color .18s; outline: none;
+}
+.input-group input:focus, .input-group select:focus {
+  border-color: rgba(245,200,66,.5); box-shadow: 0 0 0 3px rgba(245,200,66,.07);
+}
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 24px; border-radius: var(--r3); border: none; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700; letter-spacing: 1px;
+  text-decoration: none; transition: all .22s; white-space: nowrap;
+  position: relative; overflow: hidden;
+}
+.btn::after {
+  content: ''; position: absolute; inset: 0; opacity: 0;
+  background: rgba(255,255,255,.08); transition: opacity .2s;
+}
+.btn:hover::after { opacity: 1; }
+.btn-gold {
+  background: linear-gradient(135deg, var(--gld3), var(--gld), var(--gld2));
+  color: #000; box-shadow: 0 4px 18px rgba(245,200,66,.22);
+}
+.btn-gold:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(245,200,66,.3); }
+.btn-ora { background: linear-gradient(135deg,#ff7043,#d43200); color: #fff; box-shadow: 0 4px 18px rgba(255,112,67,.25); }
+.btn-ora:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(255,112,67,.35); }
+.btn-grn { background: linear-gradient(135deg,var(--grn),#00b87a); color: #000; box-shadow: 0 4px 18px rgba(0,229,160,.2); }
+.btn-grn:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(0,229,160,.3); }
+.btn-ghost { background: transparent; color: var(--txt3); border: 1px solid var(--brd); }
+.btn-ghost:hover { border-color: var(--brd3); color: var(--txt); }
+.btn-row { display: flex; gap: 11px; flex-wrap: wrap; margin-bottom: 30px; align-items: center; }
+.btn-lg { padding: 14px 32px; font-size: 1.1rem; border-radius: 11px; letter-spacing: 1.5px; }
+.btn-xl { padding: 16px 40px; font-size: 1.2rem; border-radius: 12px; letter-spacing: 2px; }
+
+.alert-sel {
+  background: rgba(245,200,66,.06); border: 1px solid rgba(245,200,66,.2);
+  border-radius: var(--r3); padding: 10px 14px; font-size: .8rem; color: var(--txt2);
+  margin-bottom: 16px; display: none; line-height: 1.5;
+}
+
+.divider { height: 1px; background: var(--brd); margin: 26px 0; }
+
+.match-strip {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r);
+  padding: 16px 22px; margin-bottom: 20px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.strip-vs { font-family: 'Barlow Condensed', sans-serif; font-size: 1.5rem; font-weight: 800; letter-spacing: 1.5px; line-height: 1; }
+.strip-vs em { color: var(--gld); font-style: normal; margin: 0 10px; font-size: .85rem; font-weight: 400; }
+.strip-venue { font-size: .65rem; color: var(--txt3); margin-top: 3px; }
+.strip-right { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pill {
+  padding: 3px 12px; border-radius: 100px; font-size: .66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .8px; border: 1px solid transparent;
+}
+.pill-safe    { background: rgba(0,229,160,.1);  color: var(--grn); border-color: rgba(0,229,160,.2); }
+.pill-balanced{ background: rgba(77,184,255,.1); color: var(--blu); border-color: rgba(77,184,255,.2); }
+.pill-risky   { background: rgba(255,77,109,.1); color: var(--red); border-color: rgba(255,77,109,.2); }
+.pill-neutral { background: var(--s3); color: var(--txt3); border-color: var(--brd); }
+
+.stats-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.stat-chip {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: 11px;
+  padding: 10px 18px; text-align: center; flex: 1; min-width: 80px;
+}
+.stat-chip strong { display: block; font-family: 'Barlow Condensed',sans-serif; font-size: 1.1rem; font-weight: 800; color: var(--gld); line-height: 1; }
+.stat-chip span   { font-size: .6rem; color: var(--txt3); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; display: block; }
+
+.res-topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.team-grid  { display: grid; grid-template-columns: repeat(auto-fill, minmax(295px, 1fr)); gap: 14px; }
+
+.team-card {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r);
+  overflow: hidden; position: relative; transition: border-color .2s, transform .22s, box-shadow .22s;
+  will-change: transform;
+}
+.team-card:hover { border-color: var(--brd3); transform: translateY(-2px); box-shadow: var(--shadow); }
+.team-hdr {
+  background: linear-gradient(135deg, var(--s3), var(--s1));
+  padding: 11px 15px; display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--brd);
+}
+.team-num { font-family: 'Barlow Condensed', sans-serif; font-size: .9rem; font-weight: 800; color: var(--gld); letter-spacing: 2px; }
+.badge { font-size: .58rem; font-weight: 700; padding: 3px 9px; border-radius: 100px; letter-spacing: .8px; text-transform: uppercase; }
+.badge-free { background: var(--grn); color: #000; }
+.badge-lock { background: var(--s5); color: var(--txt3); border: 1px solid var(--brd2); }
+
+.cv-row { display: flex; gap: 7px; padding: 11px 13px 0; }
+.cv-pill { flex: 1; background: var(--s3); border: 1px solid var(--brd); border-radius: var(--r3); padding: 7px 9px; text-align: center; }
+.cv-lbl  { display: block; font-size: .56rem; color: var(--txt3); letter-spacing: .4px; text-transform: uppercase; font-weight: 600; margin-bottom: 2px; }
+.cv-nm   { font-size: .76rem; font-weight: 700; display: block; line-height: 1.25; }
+.cv-c  .cv-nm { color: var(--gld); }
+.cv-vc .cv-nm { color: var(--blu); }
+
+.plist { list-style: none; padding: 9px 13px 0; }
+.pitem {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 0; border-bottom: 1px solid rgba(30,34,56,.8); font-size: .74rem;
+}
+.pitem:last-child { border-bottom: none; }
+.rdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.d-bat  { background: var(--blu); }
+.d-bowl { background: var(--ora); }
+.d-ar   { background: var(--grn); }
+.d-wk   { background: var(--gld); }
+.pname { flex: 1; color: var(--txt); }
+.ct  { color: var(--gld); font-size: .6rem; font-weight: 800; margin-left: 3px; }
+.vct { color: var(--blu); font-size: .6rem; font-weight: 800; margin-left: 3px; }
+.rtag { font-size: .58rem; font-weight: 700; padding: 1px 6px; border-radius: 5px; flex-shrink: 0; }
+.rL { background: rgba(0,229,160,.1);   color: var(--grn); }
+.rM { background: rgba(77,184,255,.1);  color: var(--blu); }
+.rH { background: rgba(255,77,109,.1);  color: var(--red); }
+
+.card-foot {
+  padding: 9px 13px; border-top: 1px solid var(--brd); margin-top: 9px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.foot-info { font-size: .62rem; color: var(--txt3); }
+.copy-btn {
+  background: none; border: 1px solid var(--brd); color: var(--txt3);
+  font-size: .67rem; padding: 4px 11px; border-radius: 6px; cursor: pointer;
+  transition: all .18s; font-family: 'DM Sans', sans-serif; font-weight: 500;
+}
+.copy-btn:hover:not(:disabled) { border-color: var(--gld); color: var(--gld); }
+.copy-btn:disabled { opacity: .22; cursor: default; }
+
+.lock-ov {
+  position: absolute; inset: 0; background: rgba(6,8,16,.88);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  border-radius: var(--r); z-index: 20;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  transition: opacity .45s ease;
+}
+.lock-ico { font-size: 1.8rem; }
+.lock-lbl { font-family: 'Barlow Condensed',sans-serif; font-size: .9rem; font-weight: 800; letter-spacing: 2px; color: var(--txt3); }
+.lock-sub { font-size: .62rem; color: var(--txt3); }
+
+.unlock-banner {
+  grid-column: 1/-1;
+  background: linear-gradient(135deg, rgba(20,15,2,.95), rgba(28,20,4,.95));
+  border: 2px solid rgba(245,200,66,.3); border-radius: 16px;
+  padding: 28px 32px; text-align: center;
+  position: relative; overflow: hidden;
+}
+.unlock-banner::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at top, rgba(245,200,66,.07), transparent 70%);
+  pointer-events: none;
+}
+.unlock-banner::after {
+  content: ''; position: absolute; inset: -1px; border-radius: 16px;
+  background: linear-gradient(135deg, rgba(245,200,66,.25), transparent 50%, rgba(245,200,66,.1));
+  z-index: -1; pointer-events: none;
+}
+.unlock-count {
+  display: inline-block; background: rgba(245,200,66,.12); border: 1px solid rgba(245,200,66,.28);
+  border-radius: 100px; padding: 4px 16px; font-size: .68rem; color: var(--gld);
+  font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px;
+  position: relative;
+}
+.unlock-banner h3 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.6rem; font-weight: 800; letter-spacing: 2px;
+  color: var(--gld); margin-bottom: 6px; position: relative;
+}
+.unlock-banner > p { color: var(--txt3); font-size: .8rem; margin-bottom: 18px; position: relative; line-height: 1.6; }
+.unlock-banner .btn { position: relative; }
+.unlock-perks {
+  display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;
+  margin-bottom: 18px; position: relative;
+}
+.unlock-perk { font-size: .7rem; color: var(--txt2); display: flex; align-items: center; gap: 5px; }
+
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,.96); z-index: 9000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity .28s;
+}
+.modal-bg.open { opacity: 1; pointer-events: all; }
+.modal-box {
+  background: var(--s2); border: 2px solid rgba(245,200,66,.3); border-radius: 18px;
+  padding: 36px 40px; max-width: 420px; width: 94%; text-align: center;
+  transform: scale(.94) translateY(16px); transition: transform .28s cubic-bezier(.34,1.56,.64,1);
+  position: relative; overflow: hidden;
+}
+.modal-box::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--gld), var(--ora), var(--gld));
+}
+.modal-bg.open .modal-box { transform: scale(1) translateY(0); }
+.modal-box h2 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.65rem; font-weight: 800; letter-spacing: 2px;
+  color: var(--gld); margin-bottom: 6px;
+}
+.modal-box > p { color: var(--txt3); font-size: .8rem; margin-bottom: 18px; line-height: 1.6; }
+.ad-box {
+  background: var(--s1); border: 2px dashed var(--brd2); border-radius: 13px;
+  padding: 24px 20px; margin: 0 0 16px;
+}
+.ad-icon { font-size: 2.6rem; margin-bottom: 8px; }
+.ad-label { font-size: .85rem; color: var(--txt2); font-weight: 600; }
+.ad-sub { font-size: .68rem; color: var(--txt3); margin-top: 3px; }
+.ad-prog { height: 7px; background: var(--brd); border-radius: 100px; overflow: hidden; margin-top: 16px; }
+.ad-bar {
+  height: 100%; border-radius: 100px; width: 0%;
+  background: linear-gradient(90deg, var(--ora), var(--gld));
+  transition: width .15s linear;
+  box-shadow: 0 0 8px rgba(245,200,66,.4);
+}
+.ad-tmr { font-family: 'Barlow Condensed',sans-serif; font-size: 1.15rem; font-weight: 800; color: var(--ora); margin-top: 11px; letter-spacing: 1.5px; }
+.modal-close-note { font-size: .67rem; color: var(--txt3); margin-top: 10px; }
+
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+  padding: 11px 20px; border-radius: 11px; font-size: .8rem; font-weight: 600;
+  transform: translateY(56px); opacity: 0; transition: all .3s cubic-bezier(.34,1.56,.64,1);
+  pointer-events: none; box-shadow: var(--shadow); max-width: 300px;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+
+.spinner-overlay {
+  position: fixed; inset: 0; background: rgba(6,8,16,.95); z-index: 8000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+  opacity: 0; pointer-events: none; transition: opacity .25s;
+}
+.spinner-overlay.active { opacity: 1; pointer-events: all; }
+.spinner {
+  width: 54px; height: 54px; border: 4px solid var(--brd2);
+  border-top-color: var(--gld); border-radius: 50%; animation: spin .85s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner-text { font-family: 'Barlow Condensed',sans-serif; font-size: 1.35rem; font-weight: 800; letter-spacing: 2px; color: var(--gld); }
+.spinner-sub { font-size: .76rem; color: var(--txt3); }
+
+.age-bar { display: none !important; }
+
+.content-section {
+  max-width: 860px; margin: 52px auto 0; padding: 0 20px;
+}
+.content-section h2 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.5rem; font-weight: 800; letter-spacing: 2px;
+  color: var(--gld); margin-bottom: 14px; margin-top: 36px;
+}
+.content-section h2:first-child { margin-top: 0; }
+.content-section h3 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.05rem; font-weight: 700; letter-spacing: 1px;
+  color: var(--txt); margin: 20px 0 8px;
+}
+.content-section p  { color: var(--txt2); font-size: .88rem; line-height: 1.75; margin-bottom: 12px; }
+.content-section ul, .content-section ol {
+  color: var(--txt2); font-size: .88rem; line-height: 1.75; padding-left: 1.5em; margin-bottom: 12px;
+}
+.content-section li { margin-bottom: 5px; }
+.content-section a  { color: var(--gld); text-decoration: none; }
+.content-section a:hover { text-decoration: underline; }
+.content-divider { height: 1px; background: var(--brd); margin: 30px 0; }
+
+.strategy-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 16px 0 24px; }
+@media(max-width:580px) { .strategy-grid { grid-template-columns:1fr; } }
+.strategy-card { background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r); padding: 18px 16px; }
+.strategy-card h4 { font-family:'Barlow Condensed',sans-serif; font-size:.9rem; font-weight:800; margin-bottom:7px; letter-spacing:1px; }
+.strategy-card p  { font-size:.75rem; color:var(--txt3); line-height:1.55; margin:0; }
+.strat-safe    { border-top: 3px solid var(--grn); }
+.strat-safe    h4 { color: var(--grn); }
+.strat-balanced{ border-top: 3px solid var(--blu); }
+.strat-balanced h4{ color: var(--blu); }
+.strat-risky   { border-top: 3px solid var(--red); }
+.strat-risky   h4 { color: var(--red); }
+
+.tips-box {
+  background: rgba(0,229,160,.05); border: 1px solid rgba(0,229,160,.15);
+  border-radius: var(--r); padding: 18px 20px; margin: 20px 0;
+}
+.tips-box h4 { font-family:'Barlow Condensed',sans-serif; color:var(--grn); font-size:.9rem; letter-spacing:1px; margin-bottom:10px; }
+.tips-box ul { color: var(--txt2); font-size:.83rem; margin:0; }
+
+.faq-item { background: var(--s2); border: 1px solid var(--brd); border-radius: 11px; margin-bottom: 8px; overflow: hidden; }
+.faq-q {
+  padding: 14px 17px; cursor: pointer; font-size: .85rem; font-weight: 600;
+  color: var(--txt); display: flex; justify-content: space-between; align-items: center;
+  transition: background .18s; gap: 12px;
+}
+.faq-q:hover { background: var(--s3); }
+.faq-q .arrow { color: var(--gld); font-size: 1rem; transition: transform .22s; flex-shrink: 0; }
+.faq-q.open .arrow { transform: rotate(180deg); }
+.faq-a {
+  padding: 0 17px; max-height: 0; overflow: hidden;
+  transition: max-height .32s ease, padding .32s; font-size: .82rem; color: var(--txt2); line-height: 1.7;
+}
+.faq-a.open { max-height: 400px; padding: 0 17px 15px; }
+
+footer {
+  background: var(--s1); border-top: 1px solid var(--brd);
+  padding: 36px 28px 24px; margin-top: 64px;
+}
+.footer-grid {
+  max-width: 1200px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 28px; margin-bottom: 26px;
+}
+.footer-col h4 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: .9rem; font-weight: 800; letter-spacing: 1.5px;
+  color: var(--gld); margin-bottom: 10px;
+}
+.footer-col p, .footer-col a {
+  font-size: .74rem; color: var(--txt3); display: block; margin-bottom: 5px;
+  text-decoration: none; transition: color .18s; line-height: 1.6;
+}
+.footer-col a:hover { color: var(--txt); }
+.footer-bottom {
+  max-width: 1200px; margin: 0 auto; padding-top: 18px;
+  border-top: 1px solid var(--brd);
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;
+}
+.footer-bottom p { font-size: .68rem; color: var(--txt3); }
+.footer-disclaimer {
+  font-size: .67rem; color: var(--txt3); line-height: 1.6;
+  max-width: 1200px; margin: 16px auto 0; text-align: center;
+}
+.footer-trust {
+  display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 16px;
+}
+.trust-badge {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: 8px;
+  padding: 5px 13px; font-size: .65rem; color: var(--txt3); letter-spacing: .5px;
+}
+
+.legal-wrap { max-width: 820px; margin: 0 auto; padding: 42px 22px 90px; }
+.legal-wrap h1 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 2rem; font-weight: 800; letter-spacing: 3px;
+  color: var(--gld); margin-bottom: 6px;
+}
+.legal-wrap .last-updated { font-size: .7rem; color: var(--txt3); margin-bottom: 28px; }
+.legal-wrap h2 { font-family:'Barlow Condensed',sans-serif; font-size: 1.05rem; font-weight: 700; color: var(--txt); margin: 24px 0 8px; }
+.legal-wrap p  { font-size: .85rem; color: var(--txt2); line-height: 1.75; margin-bottom: 12px; }
+.legal-wrap ul { font-size: .85rem; color: var(--txt2); line-height: 1.75; padding-left: 1.5em; margin-bottom: 12px; }
+.legal-wrap li { margin-bottom: 4px; }
+.legal-wrap a  { color: var(--gld); text-decoration: none; }
+
+.contact-form { display: flex; flex-direction: column; gap: 15px; max-width: 560px; }
+.form-group   { display: flex; flex-direction: column; gap: 6px; }
+.form-group label { font-size: .7rem; color: var(--txt3); letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
+.form-group input, .form-group textarea, .form-group select {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r3);
+  padding: 10px 13px; color: var(--txt); font-size: .85rem; font-family: 'DM Sans', sans-serif;
+  outline: none; transition: border-color .18s;
+}
+.form-group input:focus, .form-group textarea:focus {
+  border-color: rgba(245,200,66,.5); box-shadow: 0 0 0 3px rgba(245,200,66,.07);
+}
+.form-group textarea { resize: vertical; min-height: 120px; }
+.form-msg {
+  background: rgba(0,229,160,.08); border: 1px solid rgba(0,229,160,.25);
+  border-radius: var(--r3); padding: 13px 16px; font-size: .82rem; color: var(--grn); display: none;
+}
+
+.about-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap: 13px; margin: 20px 0; }
+.about-card { background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r); padding: 22px 18px; text-align: center; }
+.about-icon  { font-size: 2.1rem; margin-bottom: 10px; }
+.about-card h3 { font-family:'Barlow Condensed',sans-serif; font-size: .9rem; font-weight: 800; color: var(--txt); margin-bottom: 6px; }
+.about-card p  { font-size: .74rem; color: var(--txt3); line-height: 1.55; }
+
+.success-banner {
+  background: linear-gradient(135deg, rgba(0,229,160,.08), rgba(0,229,160,.04));
+  border-bottom: 1px solid rgba(0,229,160,.18);
+  padding: 12px 28px; display: flex; align-items: center; gap: 14px;
+  font-size: .82rem; color: var(--txt2);
+}
+.success-banner strong { color: var(--grn); display: block; font-size: .88rem; margin-bottom: 1px; }
+.success-sub { font-size: .73rem; color: var(--txt3); }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+.fade-up { animation: fadeUp .38s ease both; }
+
+.skip-link {
+  position: absolute; top: -50px; left: 18px; z-index: 9999;
+  background: var(--gld); color: #000; padding: 8px 18px;
+  border-radius: 0 0 9px 9px; font-size: .82rem; font-weight: 700;
+  text-decoration: none; transition: top .2s;
+}
+.skip-link:focus { top: 0; }
+:focus-visible { outline: 2px solid var(--gld); outline-offset: 2px; border-radius: 4px; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--gld); outline-offset: 3px; }
+
+.chip-picker {
+  background: var(--s3); border: 1px solid var(--brd); border-radius: var(--r3);
+  padding: 12px; min-height: 90px;
+}
+.chip-placeholder { font-size: .73rem; color: var(--txt3); font-style: italic; }
+.chip-team-lbl {
+  font-size: .6rem; font-weight: 700; color: var(--txt3); letter-spacing: 1.2px;
+  text-transform: uppercase; margin: 10px 0 6px;
+}
+.chip-team-lbl:first-child { margin-top: 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 4px; }
+.pchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--s4); border: 1px solid var(--brd2); border-radius: 7px;
+  padding: 5px 11px; cursor: pointer; transition: all .16s;
+  font-family: 'DM Sans', sans-serif; user-select: none;
+}
+.pchip:hover { border-color: rgba(245,200,66,.5); background: var(--gld-dim); }
+.pchip--active { background: var(--gld-dim); border-color: var(--gld); box-shadow: 0 0 0 1px var(--gld); }
+.pchip--active-excl { background: rgba(255,77,109,.12); border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.pchip-name { font-size: .73rem; color: var(--txt); font-weight: 500; line-height: 1; }
+.pchip-role { font-size: .58rem; color: var(--txt3); background: var(--s1); border-radius: 4px; padding: 1px 6px; }
+.pchip--active .pchip-name { color: var(--gld); }
+.pchip--active .pchip-role { color: var(--gld); background: rgba(245,200,66,.1); }
+.pchip--active-excl .pchip-name { color: var(--red); }
+.pchip--active-excl .pchip-role { color: var(--red); background: rgba(255,77,109,.1); }
+.chip-summary { font-size: .7rem; margin-top: 8px; min-height: 18px; line-height: 1.5; }
+
+/* 18+ Age Gate */
+.age-gate-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  background: rgba(4,5,12,.97);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.age-gate-box {
+  background: var(--s2); border: 1px solid var(--brd2); border-radius: 20px;
+  padding: 44px 40px 36px; max-width: 420px; width: 100%; text-align: center;
+  position: relative; overflow: hidden;
+  box-shadow: 0 24px 80px rgba(0,0,0,.7);
+  animation: fadeUp .35s ease both;
+}
+.age-gate-box::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--gld3), var(--gld), var(--ora));
+}
+.age-gate-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 64px; height: 64px; border-radius: 50%;
+  background: linear-gradient(135deg, rgba(245,200,66,.15), rgba(245,200,66,.05));
+  border: 2px solid rgba(245,200,66,.3);
+  font-size: 1.9rem; margin-bottom: 18px;
+}
+.age-gate-box h2 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.75rem; font-weight: 800;
+  letter-spacing: 2px; color: var(--txt); margin-bottom: 8px;
+}
+.age-gate-box p {
+  font-size: .85rem; color: var(--txt3); line-height: 1.65; margin-bottom: 28px;
+}
+.age-gate-btn-row { display: flex; gap: 12px; justify-content: center; }
+.age-gate-yes {
+  flex: 1; padding: 14px 20px; border: none; border-radius: 11px; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.1rem; font-weight: 800;
+  letter-spacing: 1.5px; transition: all .22s;
+  background: linear-gradient(135deg, var(--gld3), var(--gld), var(--gld2));
+  color: #000; box-shadow: 0 6px 22px rgba(245,200,66,.3);
+}
+.age-gate-yes:hover { transform: translateY(-2px); box-shadow: 0 10px 32px rgba(245,200,66,.45); }
+.age-gate-no {
+  padding: 14px 20px; border: 1px solid var(--brd2); border-radius: 11px; cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 600;
+  letter-spacing: 1px; transition: all .2s;
+  background: transparent; color: var(--txt3); min-width: 90px;
+}
+.age-gate-no:hover { border-color: var(--red); color: var(--red); }
+.age-gate-note { font-size: .65rem; color: var(--txt4); margin-top: 16px; line-height: 1.5; }
+.age-gate-blocked {
+  position: fixed; inset: 0; z-index: 99999;
+  background: rgba(4,5,12,.99);
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 14px; text-align: center; padding: 28px;
+}
+.age-gate-blocked h3 {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.4rem; font-weight: 800;
+  letter-spacing: 2px; color: var(--red);
+}
+.age-gate-blocked p { color: var(--txt3); font-size: .85rem; max-width: 340px; }
+
+@media print {
+  header,.step-bar,nav,.unlock-banner,.btn,.copy-btn,.lock-ov,.modal-bg,.toast,footer,.content-section,.tab-bar,.spinner-overlay { display:none!important; }
+  body { background:#fff; color:#000; padding-top:0; }
+  .team-card { border:1px solid #ccc; break-inside:avoid; background:#fff; }
+  .team-hdr  { background:#f5f5f5; }
+  .pname     { color:#000; }
+  .cv-nm     { color:#b8860b!important; }
+}
+
+@media(max-width:480px) {
+  header { padding: 0 14px; }
+  .wrap  { padding: 16px 13px 64px; }
+  .match-grid { grid-template-columns: 1fr; }
+  .mode-grid  { grid-template-columns: 1fr; }
+  .input-row  { flex-direction: column; }
+  .team-grid  { grid-template-columns: 1fr; }
+  .modal-box  { padding: 26px 22px; }
+  .hdr-nav a:not(.cta) { display: none; }
+}
 </style>
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9904803540658016"
-     crossorigin="anonymous"></script>
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9904803540658016" crossorigin="anonymous"></script>
 """
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
 
 _FOOTER = """
 <footer>
-  <div class="footer-grid">
+  <div class="footer-grid z1">
     <div class="footer-col">
-      <h4>⚡ FantasyXI</h4>
-      <p>India's smart fantasy cricket team generator for the ICC T20 World Cup 2026 Super 8s. Generate 20 unique, optimised teams in seconds.</p>
-      <p style="margin-top:8px;">📧 <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
+      <h4>⚡ AI Fantasy Team Generator</h4>
+      <p>India's #1 <strong>AI Fantasy Team Generator</strong> for cricket. Generate 20 unique AI-powered Dream11 teams for IPL, T20 World Cup, ICC tournaments and all major cricket leagues — in seconds.</p>
+      <p style="margin-top:9px;">📧 <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
     </div>
     <div class="footer-col">
       <h4>Quick Links</h4>
-      <a href="/">🏠 Home / Generator</a>
+      <a href="/">🏠 AI Team Generator</a>
       <a href="/about">ℹ️ About Us</a>
       <a href="/how-it-works">📖 How It Works</a>
       <a href="/contact">✉️ Contact Us</a>
@@ -860,62 +1088,69 @@ _FOOTER = """
     </div>
     <div class="footer-col">
       <h4>Compliance</h4>
-      <p>This website uses cookies and may display third-party advertisements. By using this site, you agree to our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms</a>.</p>
-      <p style="margin-top:6px;">🔞 For users 18+ only.</p>
+      <p>This site uses cookies and may display third-party advertisements via Google AdSense. By using this site you agree to our <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms</a>.</p>
+      <p style="margin-top:7px;">🔞 For users aged 18+ only.</p>
     </div>
   </div>
-  <div class="footer-bottom">
-    <p>© 2026 FantasyXI. All rights reserved. Not affiliated with ICC, BCCI, or any official cricket body.</p>
+  <div class="footer-trust z1">
+    <span class="trust-badge">🔒 Privacy First</span>
+    <span class="trust-badge">🚫 No Login Required</span>
+    <span class="trust-badge">✅ AdSense Compliant</span>
+    <span class="trust-badge">⚡ Instant Generation</span>
+    <span class="trust-badge">📊 Smart Algorithm</span>
+  </div>
+  <div class="footer-bottom z1">
+    <p>© 2026 AI Fantasy Team Generator. All rights reserved. Not affiliated with ICC, BCCI, or any official cricket body.</p>
     <p>Built for entertainment &amp; informational purposes only.</p>
   </div>
-  <div class="footer-disclaimer">
-    ⚠️ Fantasy sports involve financial risk. Please play responsibly. FantasyXI does not guarantee any winnings. Check local laws before participating in paid fantasy sports contests.
+  <div class="footer-disclaimer z1">
+    ⚠️ Fantasy sports involve financial risk. Please play responsibly. AI Fantasy Team Generator does not guarantee any winnings. Check local laws before participating in paid fantasy sports contests. This tool is for users 18 years and above.
   </div>
 </footer>
 """
 
-# ─── Ad Modal (Part 2 — FIXED) ────────────────────────────────────────────────
+# ─── Ad Modal ─────────────────────────────────────────────────────────────────
 
 _AD_MODAL = """
-<div class="modal-bg" id="adModal" aria-modal="true" role="dialog">
+<div class="modal-bg" id="adModal" aria-modal="true" role="dialog" aria-labelledby="adModalTitle">
   <div class="modal-box">
-    <h2>📺 Simulated Ad</h2>
-    <p>Watch this 5-second ad to unlock all remaining teams</p>
+    <h2 id="adModalTitle">📺 Ad Experience</h2>
+    <p>Watch this 5-second ad to instantly unlock all remaining teams — completely free.</p>
     <div class="ad-box">
       <div class="ad-icon">🎬</div>
-      <div class="ad-label">Advertisement</div>
-      <div class="ad-sub">Simulated · No real SDK required</div>
+      <div class="ad-label">Simulated Advertisement</div>
+      <div class="ad-sub">No real Ad SDK · Safe &amp; compliant</div>
       <div class="ad-prog"><div class="ad-bar" id="adBar"></div></div>
       <div class="ad-tmr" id="adTmr">⏳ 5s remaining</div>
     </div>
-    <p class="modal-close-note" id="closeNote">Please wait for the ad to finish…</p>
+    <p class="modal-close-note" id="closeNote">Please wait — your teams are almost ready…</p>
   </div>
 </div>
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 """
 
 # ─── Shared JS ────────────────────────────────────────────────────────────────
 
 _SHARED_JS = """
 <script>
-/* ─ Toast ─ */
 function showToast(msg, color) {
-  color = color || '#10d48e';
+  color = color || '#00e5a0';
   var t = document.getElementById('toast');
   if (!t) return;
   t.textContent = msg; t.style.background = color;
-  t.style.color = (color === '#10d48e' || color === '#f0b429') ? '#000' : '#fff';
+  t.style.color = (color === '#00e5a0' || color === '#f5c842') ? '#000' : '#fff';
   t.classList.add('show');
-  setTimeout(function(){ t.classList.remove('show'); }, 3200);
+  setTimeout(function(){ t.classList.remove('show'); }, 3400);
 }
 
-/* ─ Smooth scroll (Part 4) ─ */
-function scrollTo(id) {
+function scrollToId(id) {
   var el = document.getElementById(id);
-  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  if (!el) return;
+  var offset = 58 + 52 + 12; /* header + step bar + gap */
+  var y = el.getBoundingClientRect().top + window.pageYOffset - offset;
+  window.scrollTo({ top: y, behavior: 'smooth' });
 }
 
-/* ─ FAQ toggle ─ */
 function toggleFaq(el) {
   var a = el.nextElementSibling;
   var isOpen = el.classList.contains('open');
@@ -923,45 +1158,39 @@ function toggleFaq(el) {
     q.classList.remove('open');
     if (q.nextElementSibling) q.nextElementSibling.classList.remove('open');
   });
-  if (!isOpen) { el.classList.add('open'); a.classList.add('open'); }
+  if (!isOpen) { el.classList.add('open'); if (a) a.classList.add('open'); }
 }
 
-/* ─ Ad / unlock (Part 2 — FIXED) ─ */
 var adInterval = null;
 var adCountdown = 5;
+var adRunning = false;
 
 function openAd() {
+  if (adRunning) return;
   var modal = document.getElementById('adModal');
   if (!modal) return;
-  modal.classList.add('open');
-  adCountdown = 5;
-  var bar = document.getElementById('adBar');
-  var tmr = document.getElementById('adTmr');
+  adCountdown = 5; adRunning = true;
+  var bar  = document.getElementById('adBar');
+  var tmr  = document.getElementById('adTmr');
   var note = document.getElementById('closeNote');
-  if (bar) bar.style.width = '0%';
-  if (tmr) tmr.textContent = '⏳ 5s remaining';
-  if (note) note.textContent = 'Please wait for the ad to finish…';
-
-  // Clear any existing interval
-  if (adInterval) clearInterval(adInterval);
-
+  if (bar)  bar.style.width = '0%';
+  if (tmr)  tmr.textContent = '⏳ 5s remaining';
+  if (note) note.textContent = 'Please wait — your teams are almost ready…';
+  modal.classList.add('open');
+  if (adInterval) { clearInterval(adInterval); adInterval = null; }
   adInterval = setInterval(function() {
     adCountdown--;
     var pct = ((5 - adCountdown) / 5 * 100).toFixed(1);
     if (bar) bar.style.width = pct + '%';
-    if (tmr) {
-      if (adCountdown > 0) {
-        tmr.textContent = '⏳ ' + adCountdown + 's remaining';
-      } else {
-        tmr.textContent = '✅ Complete!';
-        if (note) note.textContent = 'Unlocking your teams…';
-      }
-    }
-    if (adCountdown <= 0) {
-      clearInterval(adInterval);
-      adInterval = null;
+    if (adCountdown > 0) {
+      if (tmr) tmr.textContent = '⏳ ' + adCountdown + 's remaining';
+    } else {
+      if (tmr)  tmr.textContent = '✅ Complete!';
+      if (note) note.textContent = 'Unlocking your teams now…';
+      clearInterval(adInterval); adInterval = null;
       setTimeout(function() {
         modal.classList.remove('open');
+        adRunning = false;
         doUnlock();
       }, 700);
     }
@@ -969,42 +1198,38 @@ function openAd() {
 }
 
 function doUnlock() {
-  fetch('/unlock', { method: 'POST' })
+  fetch('/unlock', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (!d.success) { showToast('Error unlocking. Please try again.', '#f04f4f'); return; }
-      // Remove all lock overlays with animation
+      if (!d.success) { showToast('Error unlocking. Please try again.', '#ff4d6d'); return; }
       document.querySelectorAll('.lock-ov').forEach(function(el) {
-        el.style.transition = 'opacity .45s ease';
         el.style.opacity = '0';
-        setTimeout(function() { el.remove(); }, 450);
+        setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 480);
       });
-      // Enable all copy buttons
       document.querySelectorAll('.copy-btn').forEach(function(b) { b.disabled = false; });
-      // Update badge on locked cards
       document.querySelectorAll('.badge-lock').forEach(function(b) {
         b.textContent = '✓ UNLOCKED'; b.classList.remove('badge-lock'); b.classList.add('badge-free');
       });
-      // Update unlock banner
       var banner = document.getElementById('unlockBanner');
       if (banner) {
-        banner.innerHTML = '<h3 style="color:var(--grn);position:relative;">✅ All Teams Unlocked!</h3>'
-          + '<p style="position:relative;color:var(--txt2);">All ' + document.querySelectorAll('.team-card').length + ' teams are now available.</p>'
+        var total = document.querySelectorAll('.team-card').length;
+        banner.innerHTML =
+          '<div class="unlock-count" style="position:relative;">ALL ' + total + ' TEAMS UNLOCKED</div>'
+          + '<h3 style="color:var(--grn);position:relative;">✅ Fully Unlocked!</h3>'
+          + '<p style="position:relative;color:var(--txt2);">Enjoy all your generated teams. Download a clean PDF below.</p>'
           + '<div style="position:relative;margin-top:4px;">'
-          + '<a href="/export_pdf" class="btn btn-grn btn-lg">📄 Export All Teams as PDF</a></div>';
+          + '<a href="/export_pdf" class="btn btn-grn btn-lg">📄 Export All as PDF</a></div>';
       }
-      // Show PDF button in header
       var pBtn = document.getElementById('pdfBtn');
       if (pBtn) pBtn.style.display = 'inline-flex';
-      showToast('🎉 All teams unlocked!', '#f0b429');
+      showToast('🎉 All teams unlocked! Enjoy.', '#f5c842');
     })
-    .catch(function() { showToast('Network error. Please retry.', '#f04f4f'); });
+    .catch(function() { showToast('Network error. Please retry.', '#ff4d6d'); });
 }
 
-/* ─ Copy team ─ */
 function copyTeam(idx) {
   var cards = document.querySelectorAll('.team-card');
-  var card = cards[idx];
+  var card  = cards[idx];
   if (!card) return;
   var num = card.querySelector('.team-num') ? card.querySelector('.team-num').textContent : '';
   var nms = card.querySelectorAll('.cv-nm');
@@ -1026,111 +1251,131 @@ function copyTeam(idx) {
 </script>
 """
 
-# ─── HOME PAGE ────────────────────────────────────────────────────────────────
+# =============================================================================
+# ─── HOME PAGE ───────────────────────────────────────────────────────────────
+# =============================================================================
 
 HOME_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>FantasyXI — ICC T20 WC 2026 Super 8s Fantasy Team Generator | Free Dream11 Teams</title>
-<meta name="description" content="Generate 20 unique fantasy cricket teams for ICC T20 World Cup 2026 Super 8s. Smart distribution with Safe, Balanced and Risky modes. Free Dream11 team generator.">
-<meta name="keywords" content="fantasy cricket, T20 World Cup 2026, fantasy team generator, ICC Super 8s, dream11 teams, fantasy XI, cricket team generator">
+<title>AI Fantasy Team Generator — AI 20 Fantasy Cricket Teams | Dream11, IPL, T20 World Cup</title>
+<meta name="description" content="AI Fantasy Team Generator is the #1 AI Cricket Team Generator. Generate 20 unique Dream11 AI teams for IPL, T20 World Cup, ICC tournaments and all major leagues. Smart algorithm, Safe/Balanced/Risky modes — 100% free.">
+<meta name="keywords" content="AI fantasy team generator, dream11 AI team, fantasy cricket AI, AI cricket team prediction, dream11 team generator, IPL fantasy team, T20 World Cup fantasy, ICC fantasy cricket, fantasy XI generator, AI fantasy cricket 2026">
 <meta name="robots" content="index, follow">
-<meta name="author" content="FantasyXI">
-<meta property="og:title" content="FantasyXI — ICC T20 WC 2026 Super 8s Fantasy Team Generator">
-<meta property="og:description" content="Generate 20 unique fantasy cricket teams for ICC T20 WC 2026 Super 8s. Safe, Balanced and Risky modes. 100% free.">
+<meta name="author" content="AI Fantasy Team Generator">
+<meta property="og:title" content="AI Fantasy Team Generator — 20 AI Fantasy Cricket Teams | Dream11, IPL, T20 World Cup">
+<meta property="og:description" content="Generate 20 unique AI-powered fantasy cricket teams for IPL, T20 World Cup, ICC tournaments and all major leagues. Safe, Balanced and Risky modes. 100% free.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://fantasyxi.in/">
-<meta property="og:site_name" content="FantasyXI">
+<meta property="og:site_name" content="AI Fantasy Team Generator">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="FantasyXI — ICC T20 WC 2026 Fantasy Team Generator">
-<meta name="twitter:description" content="Generate 20 unique fantasy cricket teams for T20 WC 2026 Super 8s. Free, instant, smart.">
+<meta name="twitter:title" content="AI Fantasy Team Generator — 20 AI Fantasy Cricket Teams">
+<meta name="twitter:description" content="Generate 20 unique AI-powered fantasy cricket teams for any match. Free Dream11 AI team generator with smart algorithm.">
 <link rel="canonical" href="https://fantasyxi.in/">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is FantasyXI free to use?","acceptedAnswer":{"@type":"Answer","text":"Yes. The first 3 teams are always free. Remaining teams unlock by watching a short simulated ad — no payment required."}},{"@type":"Question","name":"Which players are included?","acceptedAnswer":{"@type":"Answer","text":"Only confirmed Playing XI players (top 11) are used. Bench players are never included."}},{"@type":"Question","name":"What is the difference between Safe, Balanced, and Risky modes?","acceptedAnswer":{"@type":"Answer","text":"Safe weights low-risk captains for small contests. Balanced mixes risk. Risky maximises differentials for mega contests."}},{"@type":"Question","name":"Are these teams guaranteed to win?","acceptedAnswer":{"@type":"Answer","text":"No. FantasyXI is an informational tool. Outcomes depend on real match events. Always play responsibly."}}]}
-</script>
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+  {"@type":"Question","name":"What is AI Fantasy Team Generator?","acceptedAnswer":{"@type":"Answer","text":"AI Fantasy Team Generator is an AI-powered fantasy cricket team generator that creates 20 unique, optimised teams for any cricket match — IPL, T20 World Cup, ICC tournaments and all major leagues."}},
+  {"@type":"Question","name":"Is the AI Fantasy Team Generator free to use?","acceptedAnswer":{"@type":"Answer","text":"Yes. The first 3 teams are always free. Remaining teams unlock by watching a 5-second simulated ad — no payment required."}},
+  {"@type":"Question","name":"Which tournaments does the AI team generator support?","acceptedAnswer":{"@type":"Answer","text":"AI Fantasy Team Generator works for all major cricket tournaments including IPL, T20 World Cup, ICC Cricket World Cup, Big Bash League, The Hundred, and all international T20 series."}},
+  {"@type":"Question","name":"How is this different from a normal fantasy team generator?","acceptedAnswer":{"@type":"Answer","text":"AI Fantasy Team Generator uses AI-powered risk weighting, intelligent C/VC rotation, exposure control, and differential injection — far beyond simple random generation."}},
+  {"@type":"Question","name":"Are AI-generated fantasy teams guaranteed to win?","acceptedAnswer":{"@type":"Answer","text":"No. AI Fantasy Team Generator is an informational and entertainment tool. Outcomes depend on real match events. Always play responsibly."}}
+]}</script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebSite","name":"FantasyXI","url":"https://fantasyxi.in","description":"ICC T20 World Cup 2026 Super 8s fantasy cricket team generator"}
-</script>
+{"@context":"https://schema.org","@type":"WebSite","name":"AI Fantasy Team Generator","url":"https://fantasyxi.in","description":"AI Fantasy Team Generator for cricket — IPL, T20 World Cup, ICC tournaments and all major leagues"}</script>
 """ + _CSS + """
 </head>
 <body>
-<a href="#tool" class="skip-link" aria-label="Skip to team generator">Skip to generator</a>
 
-<!-- Loading spinner overlay -->
+<!-- 18+ AGE GATE -->
+<div class="age-gate-overlay" id="ageGate" role="dialog" aria-modal="true" aria-labelledby="ageGateTitle">
+  <div class="age-gate-box">
+    <div class="age-gate-badge">🔞</div>
+    <h2 id="ageGateTitle">Age Verification</h2>
+    <p>AI Fantasy Team Generator contains content related to fantasy sports which may involve financial risk. You must be 18 years or older to continue.</p>
+    <p style="font-weight:600;color:var(--txt);margin-bottom:28px;font-size:.9rem;">Are you 18 years or older?</p>
+    <div class="age-gate-btn-row">
+      <button class="age-gate-yes" onclick="ageConfirm(true)">✓ Yes, I'm 18+</button>
+      <button class="age-gate-no"  onclick="ageConfirm(false)">No</button>
+    </div>
+    <p class="age-gate-note">By clicking "Yes, I'm 18+", you confirm you are of legal age to access this content in your jurisdiction.</p>
+  </div>
+</div>
+<div class="age-gate-blocked" id="ageBlocked">
+  <h3>Access Restricted</h3>
+  <p>You must be 18 years or older to access AI Fantasy Team Generator. This site contains content related to fantasy sports which is intended for adults only.</p>
+</div>
+
+<a href="#tool" class="skip-link">Skip to generator</a>
+
+<!-- Loading spinner -->
 <div class="spinner-overlay" id="spinnerOverlay" role="status" aria-live="polite">
   <div class="spinner" aria-hidden="true"></div>
   <div class="spinner-text">Generating Teams…</div>
-  <div class="spinner-sub">Running distribution engine · Please wait</div>
+  <div class="spinner-sub">Running smart distribution engine · Please wait</div>
 </div>
 
+<!-- ═══════════════════════════════
+     FIXED HEADER
+     ═══════════════════════════════ -->
 <header role="banner">
   <div class="logo-wrap">
-    <div>
-      <div class="logo" aria-label="FantasyXI logo">⚡ FantasyXI</div>
-    </div>
-    <span class="logo-badge">Super 8s · T20 WC 2026</span>
+    <a href="/" class="logo">⚡ AI Fantasy Team Generator</a>
   </div>
   <nav class="hdr-nav" aria-label="Main navigation">
     <a href="/about">About</a>
     <a href="/how-it-works">How It Works</a>
     <a href="/privacy">Privacy</a>
-    <a href="#tool" class="cta">Generate →</a>
   </nav>
 </header>
 
-<!-- Part 5: Compact hero -->
-<div class="hero z1" id="top">
-  <h1>ICC T20 WC 2026 · Fantasy Team Generator</h1>
-  <div class="hero-meta">
-    <span class="hero-tag">⚡ 20 unique teams</span>
-    <span class="hero-sep">·</span>
-    <span class="hero-tag">3 risk modes</span>
-    <span class="hero-sep">·</span>
-    <span class="hero-tag">Smart distribution engine</span>
-    <span class="hero-pill">🏆 Super 8s Edition</span>
-  </div>
-</div>
-
-<main class="wrap z1" id="tool" aria-label="Fantasy Team Generator">
-
-  <!-- Step progress indicator -->
-  <div class="step-bar" id="stepBar" aria-label="Progress steps">
+<!-- ═══════════════════════════════
+     STICKY STEP PROGRESS BAR
+     Fixed below header, always visible
+     ═══════════════════════════════ -->
+<div class="step-bar" id="stepBar" aria-label="Progress steps">
+  <div class="step-bar-inner">
     <div class="step" id="step1">
-      <div class="step-num" aria-label="Step 1">1</div>
+      <div class="step-num">1</div>
       <span class="step-lbl">Select Match</span>
       <div class="step-line"></div>
     </div>
     <div class="step" id="step2">
-      <div class="step-num" aria-label="Step 2">2</div>
+      <div class="step-num">2</div>
       <span class="step-lbl">Choose Mode</span>
       <div class="step-line"></div>
     </div>
     <div class="step" id="step3">
-      <div class="step-num" aria-label="Step 3">3</div>
+      <div class="step-num">3</div>
       <span class="step-lbl">Set Criteria</span>
       <div class="step-line"></div>
     </div>
     <div class="step" id="step4">
-      <div class="step-num" aria-label="Step 4">4</div>
+      <div class="step-num">4</div>
       <span class="step-lbl">Generate</span>
-      <div class="step-line" style="display:none"></div>
+      <!-- No line after last step -->
     </div>
   </div>
+</div>
 
-  <div class="age-bar" role="note">⚠️ This tool is intended for users aged 18 and above. Fantasy sports may involve financial risk in paid contests. Play responsibly.</div>
+<!-- ═══════════════════════════════
+     MAIN CONTENT
+     ═══════════════════════════════ -->
+<main class="wrap z1" id="tool">
 
   <!-- Tabs -->
-  <div class="tab-bar">
-    <button class="tab-btn active" onclick="showTab('up', this)" role="tab" aria-selected="true" aria-controls="tab-up">📅 Upcoming Matches</button>
-    <button class="tab-btn" onclick="showTab('man', this)" role="tab" aria-selected="false" aria-controls="tab-man">⚙ Manual Selection</button>
+  <div class="tab-bar" role="tablist">
+    <button class="tab-btn active" onclick="showTab('up',this)" role="tab" aria-selected="true" aria-controls="tab-up">📅 Upcoming Matches</button>
+    <button class="tab-btn" onclick="showTab('man',this)" role="tab" aria-selected="false" aria-controls="tab-man">⚙ Manual Selection</button>
   </div>
 
   <!-- UPCOMING -->
   <div id="tab-up" role="tabpanel">
-    <h2 class="sh">Select a Match</h2>
-    <div class="match-grid" role="list" aria-label="Upcoming matches">
+    <h2 class="sh">Select a Match <small>Step 1</small></h2>
+    <div class="match-grid" role="list">
     {% for m in matches %}
-      <div class="match-card" role="listitem button" tabindex="0" onclick="selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(\"'\",\"\")}}', this)">
+      <div class="match-card" role="listitem" tabindex="0"
+        onclick="selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(\"'\",\"\")}}',this)"
+        onkeydown="if(event.key==='Enter')selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(\"'\",\"\")}}',this)">
         <div class="match-time">{{m.time}}</div>
         <div class="match-id-tag">📅 {{m.date}} · {{m.match_id}}</div>
         <div class="match-vs">{{m.team1}}<em>VS</em>{{m.team2}}</div>
@@ -1138,17 +1383,19 @@ HOME_PAGE = """<!DOCTYPE html>
       </div>
     {% endfor %}
     </div>
-    <div class="alert-sel" id="selInfo"></div>
+    <div class="alert-sel" id="selInfo" role="status"></div>
   </div>
 
   <!-- MANUAL -->
-  <div id="tab-man" style="display:none;">
+  <div id="tab-man" style="display:none;" role="tabpanel">
     <div class="sh">Manual Team Selection</div>
     <div class="input-row">
-      <div class="input-group"><label>Team 1</label>
+      <div class="input-group">
+        <label for="mt1">Team 1</label>
         <select id="mt1">{% for t in all_teams %}<option value="{{t.team}}">{{t.team}}</option>{% endfor %}</select>
       </div>
-      <div class="input-group"><label>Team 2</label>
+      <div class="input-group">
+        <label for="mt2">Team 2</label>
         <select id="mt2">{% for t in all_teams %}<option value="{{t.team}}"{% if loop.index==2 %} selected{% endif %}>{{t.team}}</option>{% endfor %}</select>
       </div>
     </div>
@@ -1157,424 +1404,434 @@ HOME_PAGE = """<!DOCTYPE html>
 
   <div class="divider"></div>
 
-  <!-- Part 4: Mode section — scroll target -->
+  <!-- MODE -->
   <div id="section-mode">
-    <h2 class="sh">Generation Mode</h2>
-    <div class="mode-grid" role="radiogroup" aria-label="Select generation mode">
-      <div class="mode-card safe" onclick="selectMode('safe', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('safe',this)">
+    <h2 class="sh">AI Generation Mode <small>Step 2</small></h2>
+    <div class="mode-grid" role="radiogroup" aria-label="Generation mode">
+      <div class="mode-card safe" role="radio" aria-checked="false" tabindex="0"
+        onclick="selectMode('safe',this)"
+        onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('safe',this)">
         <div class="mode-icon">🛡</div>
         <div class="mode-name">Safe</div>
-        <div class="mode-desc">Low-risk captains · Conservative stable picks</div>
-        <div class="mode-note">Best for small contests</div>
+        <div class="mode-desc">Low-risk captains · Consistent stable picks · Minimise variance</div>
+        <div class="mode-note">✓ Best for small contests &amp; H2H</div>
       </div>
-      <div class="mode-card balanced" onclick="selectMode('balanced', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('balanced',this)">
+      <div class="mode-card balanced" role="radio" aria-checked="false" tabindex="0"
+        onclick="selectMode('balanced',this)"
+        onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('balanced',this)">
         <div class="mode-icon">⚖️</div>
         <div class="mode-name">Balanced</div>
-        <div class="mode-desc">Mixed risk · Smart C/VC rotation</div>
-        <div class="mode-note">Best for mid-size contests</div>
+        <div class="mode-desc">Mixed risk · Smart C/VC rotation · Best of both worlds</div>
+        <div class="mode-note">✓ Best for mid-size contests</div>
       </div>
-      <div class="mode-card risky" onclick="selectMode('risky', this)" role="radio" aria-checked="false" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('risky',this)">
+      <div class="mode-card risky" role="radio" aria-checked="false" tabindex="0"
+        onclick="selectMode('risky',this)"
+        onkeydown="if(event.key==='Enter'||event.key===' ')selectMode('risky',this)">
         <div class="mode-icon">🔥</div>
         <div class="mode-name">Risky</div>
-        <div class="mode-desc">High-risk differentials · Max points ceiling</div>
-        <div class="mode-note">Best for mega contests</div>
+        <div class="mode-desc">High-risk differentials · Max points ceiling · Stand out from the field</div>
+        <div class="mode-note">✓ Best for mega contests</div>
       </div>
     </div>
   </div>
 
-  <!-- Part 3: Advanced Criteria — scroll target -->
+  <!-- ADVANCED CRITERIA -->
   <div id="section-criteria">
-    <h2 class="sh">Advanced Criteria</h2>
+    <h2 class="sh">Advanced Criteria <small>Step 3 · Optional</small></h2>
 
     <div class="adv-section">
-
-      <!-- Group 1: Basic settings -->
-      <div class="adv-group">
-        <div class="adv-group-title">⚙️ Generation Settings</div>
-        <div class="input-row">
-          <div class="input-group">
-            <label>Teams to Generate (max 20)</label>
-            <input type="number" id="nt" value="20" min="5" max="20">
-          </div>
-          <div class="input-group">
-            <label>Player Exposure Limit (%)</label>
-            <input type="number" id="exposure" value="75" min="10" max="100"
-              title="Max % of teams a single player can appear in">
-          </div>
-          <div class="input-group">
-            <label>Max Players from One Team</label>
-            <input type="number" id="max_from_one" value="7" min="5" max="10">
-          </div>
-        </div>
+      <div class="adv-header" onclick="toggleAdv(this)" role="button" aria-expanded="true" aria-controls="advBody">
+        <span class="adv-header-title">⚙️ Configuration Engine — Power Options</span>
+        <span class="adv-header-arrow open">▼</span>
       </div>
 
-      <!-- Group 2: Captain/VC controls -->
-      <div class="adv-group">
-        <div class="adv-group-title">👑 Captain &amp; Vice-Captain Rules</div>
-        <div class="crit-grid">
-          <label class="crit-item">
-            <input type="checkbox" id="c6" checked>
-            <span>At least 5 unique C/VC combinations</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c7" checked>
-            <span>Avoid same C/VC pair repeating</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c8" checked>
-            <span>Risk-based captain weighting</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c11" checked>
-            <span>Captain must not repeat &gt;3 consecutive</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c15" checked>
-            <span>≥1 All-rounder captain in first 5 teams</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="unique_cap">
-            <span>Unique captain for each team</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="unique_vc">
-            <span>Unique vice-captain for each team</span>
-          </label>
-        </div>
-      </div>
+      <div class="adv-body" id="advBody">
 
-      <!-- Group 3: Team composition -->
-      <div class="adv-group">
-        <div class="adv-group-title">🏏 Team Composition Rules</div>
-        <div class="crit-grid">
-          <label class="crit-item">
-            <input type="checkbox" id="c1" checked>
-            <span>Balanced 6:5 team-split rotation</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c12" checked>
-            <span>No identical team combination</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c13" checked>
-            <span>Max players from one team limit</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="c14" checked>
-            <span>Role constraints (WK/BAT/AR/BOWL)</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="balanced_dist">
-            <span>Balanced team distribution toggle</span>
-          </label>
-          <label class="crit-item">
-            <input type="checkbox" id="differential">
-            <span>Differential player inclusion (last 10 teams)</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- Group 4: Player controls -->
-      <div class="adv-group">
-        <div class="adv-group-title">🎯 Player Controls</div>
-        <p style="font-size:.7rem;color:var(--txt3);margin-bottom:12px;">Select a match above to load players. <strong style="color:var(--txt2);">Click a player chip to select</strong> — click again to deselect. Multiple players can be selected.</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-
-          <!-- Lock picker -->
-          <div>
-            <div style="font-size:.68rem;font-weight:700;color:var(--grn);letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;">🔒 Lock Players <span style="color:var(--txt3);font-weight:400;">(in every team)</span></div>
-            <div id="lock_picker" class="chip-picker">
-              <span class="chip-placeholder">Select a match first</span>
+        <div class="adv-group">
+          <div class="adv-group-title">⚙️ Generation Settings <span>CORE</span></div>
+          <div class="input-row">
+            <div class="input-group">
+              <label for="nt">Teams to Generate (max 20)</label>
+              <input type="number" id="nt" value="20" min="5" max="20">
             </div>
-            <div id="lock_summary" class="chip-summary"></div>
-          </div>
-
-          <!-- Exclude picker -->
-          <div>
-            <div style="font-size:.68rem;font-weight:700;color:var(--red);letter-spacing:.8px;text-transform:uppercase;margin-bottom:7px;">🚫 Exclude Players <span style="color:var(--txt3);font-weight:400;">(never picked)</span></div>
-            <div id="excl_picker" class="chip-picker">
-              <span class="chip-placeholder">Select a match first</span>
+            <div class="input-group">
+              <label for="max_from_one">Max Players from One Team</label>
+              <input type="number" id="max_from_one" value="7" min="5" max="10">
             </div>
-            <div id="excl_summary" class="chip-summary"></div>
           </div>
-
+          <div class="input-row">
+            <div class="input-group">
+              <label for="exposure">Exposure Limit (%) <span style="color:var(--gld);font-weight:700;" id="exposureVal">75%</span></label>
+              <input type="range" id="exposure" value="75" min="10" max="100" oninput="document.getElementById('exposureVal').textContent=this.value+'%'">
+            </div>
+            <div class="input-group">
+              <label for="risk_intensity">Risk Intensity <span style="color:var(--gld);font-weight:700;" id="riskIntVal">1.0×</span></label>
+              <input type="range" id="risk_intensity" value="10" min="5" max="25" oninput="document.getElementById('riskIntVal').textContent=(this.value/10).toFixed(1)+'×'">
+            </div>
+            <div class="input-group">
+              <label for="rand_strength">Randomisation Strength <span style="color:var(--gld);font-weight:700;" id="randVal">Medium</span></label>
+              <input type="range" id="rand_strength" value="5" min="0" max="10" oninput="document.getElementById('randVal').textContent=['Off','Very Low','Low','Low-Med','Medium','Medium','Med-High','High','High','Very High','Max'][this.value]">
+            </div>
+          </div>
         </div>
-      </div>
 
+        <div class="adv-group">
+          <div class="adv-group-title">👑 Captain &amp; Vice-Captain Rules <span>STRATEGY</span></div>
+          <div class="crit-grid">
+            <label class="crit-item"><input type="checkbox" id="c6" checked><div class="crit-label">At least 5 unique C/VC combinations<small>Ensures diversity across teams</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c7" checked><div class="crit-label">Avoid same C/VC pair repeating<small>No duplicate captain combos</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c8" checked><div class="crit-label">Risk-based captain weighting<small>Mode affects captain pool</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c11" checked><div class="crit-label">Prevent same captain &gt;3 consecutive<small>Rotates captain intelligently</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c15" checked><div class="crit-label">≥1 All-rounder captain in first 5<small>Guaranteed AR captaincy early</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="unique_cap"><div class="crit-label">Unique captain per team<small>No captain repeats across teams</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="unique_vc"><div class="crit-label">Unique vice-captain per team<small>No VC repeats across teams</small></div></label>
+          </div>
+        </div>
+
+        <div class="adv-group">
+          <div class="adv-group-title">🏏 Team Composition &amp; Distribution <span>STRUCTURE</span></div>
+          <div class="crit-grid">
+            <label class="crit-item"><input type="checkbox" id="c1" checked><div class="crit-label">6:5 team-split rotation<small>Alternates which team has 6 players</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c12" checked><div class="crit-label">No identical team combination<small>Guarantees 100% unique teams</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c13" checked><div class="crit-label">Max players from one team enforced<small>Uses "Max from One Team" setting</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="c14" checked><div class="crit-label">Role constraints (WK/BAT/AR/BOWL)<small>Valid fantasy composition required</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="balanced_dist"><div class="crit-label">Balanced distribution toggle<small>Equal player spread across teams</small></div></label>
+            <label class="crit-item"><input type="checkbox" id="differential"><div class="crit-label">Differential injection (last 10 teams)<small>Boosts low-ownership players late</small></div></label>
+          </div>
+          <div class="input-row" style="margin-top:14px;margin-bottom:0;">
+            <div class="input-group">
+              <label for="min_diff">Min Differential Players per Team</label>
+              <input type="number" id="min_diff" value="0" min="0" max="5">
+            </div>
+          </div>
+        </div>
+
+        <div class="adv-group">
+          <div class="adv-group-title">🎯 Player Controls — Lock &amp; Exclude <span>PRECISION</span></div>
+          <p style="font-size:.72rem;color:var(--txt3);margin-bottom:14px;">
+            Select a match first to load players. <strong style="color:var(--txt2);">Click a chip to toggle</strong> lock (green) or exclude (red).
+          </p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+            <div>
+              <div style="font-size:.68rem;font-weight:700;color:var(--grn);letter-spacing:.9px;text-transform:uppercase;margin-bottom:8px;">
+                🔒 Lock Players <span style="color:var(--txt3);font-weight:400;">(appear in every team)</span>
+              </div>
+              <div id="lock_picker" class="chip-picker"><span class="chip-placeholder">Select a match first</span></div>
+              <div id="lock_summary" class="chip-summary"></div>
+            </div>
+            <div>
+              <div style="font-size:.68rem;font-weight:700;color:var(--red);letter-spacing:.9px;text-transform:uppercase;margin-bottom:8px;">
+                🚫 Exclude Players <span style="color:var(--txt3);font-weight:400;">(never picked)</span>
+              </div>
+              <div id="excl_picker" class="chip-picker"><span class="chip-placeholder">Select a match first</span></div>
+              <div id="excl_summary" class="chip-summary"></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /adv-body -->
     </div><!-- /adv-section -->
 
     <div class="btn-row">
-      <button class="btn btn-gold btn-lg" id="generateBtn" onclick="doGenerate()"
-        aria-label="Generate fantasy teams based on selected settings">
-        ⚡ Generate Teams
+      <button class="btn btn-gold btn-xl" id="generateBtn" onclick="doGenerate()" aria-label="Generate AI fantasy teams">
+        🤖 Generate AI Teams
       </button>
-      <button class="btn btn-ghost" onclick="resetAll()" aria-label="Reset all selections">↺ Reset</button>
+      <button class="btn btn-ghost" onclick="resetAll()" aria-label="Reset all">↺ Reset All</button>
+    </div>
+  </div><!-- /section-criteria -->
+
+</main>
+
+<!-- HIGH-AUTHORITY CONTENT SECTION -->
+<section class="content-section z1" aria-label="Guide and FAQ" id="guide">
+
+  <h2 id="how-it-works">What is AI Fantasy Team Generator?</h2>
+  <p>AI Fantasy Team Generator is an <strong>AI-powered fantasy cricket team generator</strong> that builds 20 unique, strategically optimised Dream11 teams for any cricket match — IPL, ICC T20 World Cup, ODI World Cup, Big Bash League, The Hundred, international T20 series, and all other major cricket tournaments. Whether you're playing on Dream11, MyTeam11, or any other fantasy platform, our AI team generator gives you an instant, data-driven portfolio of 20 ready-to-enter lineups.</p>
+  <p>Unlike basic random fantasy team builders, AI Fantasy Team Generator's engine applies multi-layer probability weighting, enforces cricket-valid role constraints, intelligently rotates captain and vice-captain selections, controls player exposure limits, and guarantees zero duplicate teams — producing a genuinely diverse, strategically sound set of AI-generated fantasy teams in seconds.</p>
+
+  <h3>How the AI Team Generation Algorithm Works</h3>
+  <p>Our AI fantasy team generator runs a sophisticated distribution engine behind the scenes. For each of the 20 team slots, the algorithm samples players using risk-weighted probabilities that reflect each player's expected impact and consistency. It tracks how many times each player has appeared across already-generated teams and actively reduces the probability of over-used players — keeping your ownership percentages healthy and your portfolio diverse.</p>
+
+  <div class="content-divider"></div>
+
+  <h2 id="strategy">AI Dream11 Team Strategy — Safe vs Balanced vs Risky</h2>
+  <div class="strategy-grid">
+    <div class="strategy-card strat-safe">
+      <h4>🛡 Safe Mode</h4>
+      <p>The AI weights low-risk players 5× above average and restricts captain selection to the most consistent performers. Ideal for small leagues and head-to-head contests.</p>
+    </div>
+    <div class="strategy-card strat-balanced">
+      <h4>⚖️ Balanced Mode</h4>
+      <p>The AI mixes low and medium risk with smart C/VC rotation. Best for mid-size contests (1,000–50,000 players).</p>
+    </div>
+    <div class="strategy-card strat-risky">
+      <h4>🔥 Risky Mode</h4>
+      <p>The AI heavily weights differential players (6× vs Low risk). Designed for mega contests and grand leagues (50,000+ players).</p>
     </div>
   </div>
 
-</main><!-- /main tool -->
+  <div class="tips-box">
+    <h4>💡 AI Fantasy Team Generator — Expert Tips</h4>
+    <ul>
+      <li>Use the <strong>exposure limit slider</strong> (75% default) so no single player dominates your 20-team portfolio.</li>
+      <li>Enable <strong>differential injection</strong> in the AI — your last 10 teams will automatically favour lower-ownership picks.</li>
+      <li>Lock your must-have players to guarantee they appear in every AI-generated team.</li>
+      <li>In <strong>Risky mode</strong>, enable <strong>unique captain per team</strong> to spread AI captain picks across multiple differentials.</li>
+      <li>For IPL grand leagues, use Risky mode with high randomisation strength for maximum portfolio diversity.</li>
+    </ul>
+  </div>
 
-<!-- Content section -->
-<section class="content-section z1" aria-label="How it works and FAQ">
-  <h2>How FantasyXI Works</h2>
-  <p>FantasyXI uses a smart distribution engine to generate up to 20 unique fantasy cricket teams for any ICC T20 World Cup 2026 Super 8s match. Every team is built exclusively from the confirmed Playing XI of each side — bench players are never included.</p>
+  <div class="content-divider"></div>
 
-  <h3>Three Risk Modes</h3>
-  <p>Choose <strong>Safe</strong> for low-risk captains and stable picks, <strong>Balanced</strong> for mixed-risk smart rotation, or <strong>Risky</strong> for high-differential maximum-ceiling teams. All modes strictly use the top 11 confirmed players.</p>
-
-  <h3>Advanced Distribution Rules</h3>
-  <p>The engine enforces role constraints (1–4 WK, 3–6 Batsmen, 1–4 All-rounders, 3–6 Bowlers), avoids duplicate team combinations, rotates C/VC pairs intelligently, limits player exposure, and respects lock/exclude player controls. Advanced options like differential inclusion and balanced distribution give you full strategic control.</p>
-
-  <h2 style="margin-top:30px;">Frequently Asked Questions</h2>
+  <h2 id="faq">Frequently Asked Questions</h2>
 
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">Is FantasyXI free to use? <span class="arrow">▼</span></div>
-    <div class="faq-a">Yes. The first 3 generated teams are always completely free. You can unlock the remaining teams by watching a short 5-second simulated ad — no real payment required.</div>
+    <div class="faq-q" onclick="toggleFaq(this)">What is an AI Fantasy Team Generator? <span class="arrow">▼</span></div>
+    <div class="faq-a">An AI Fantasy Team Generator uses artificial intelligence and data-driven algorithms to automatically create optimised fantasy cricket teams. Our AI engine applies risk-weighted player sampling, intelligent captain rotation, role constraints, and exposure controls to generate 20 unique, ready-to-enter teams for any cricket match.</div>
   </div>
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">Which players are included? <span class="arrow">▼</span></div>
-    <div class="faq-a">All teams are built exclusively from the confirmed Playing XI (players 1–11) of each team. Bench players are never used in any mode.</div>
+    <div class="faq-q" onclick="toggleFaq(this)">Is AI Fantasy Team Generator free to use? <span class="arrow">▼</span></div>
+    <div class="faq-a">Yes, completely. The first 3 AI-generated teams are always fully visible and free. The remaining teams unlock instantly by watching a short 5-second simulated ad — no payment, subscription, or account creation required.</div>
   </div>
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">What is the difference between Safe, Balanced, and Risky modes? <span class="arrow">▼</span></div>
-    <div class="faq-a">Safe weights low-risk players and always selects captains from low-risk players — ideal for small contests. Balanced mixes low and medium risk. Risky weights high-risk differentials heavily and is best for mega contests where you need to stand out.</div>
+    <div class="faq-q" onclick="toggleFaq(this)">Which cricket tournaments does it support? <span class="arrow">▼</span></div>
+    <div class="faq-a">AI Fantasy Team Generator works for all major cricket tournaments — IPL, ICC T20 World Cup (including Super 8 matches), ICC ODI World Cup, ICC Champions Trophy, Big Bash League, The Hundred, SA20, ILT20, Caribbean Premier League, and all international T20 and ODI bilateral series.</div>
   </div>
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">Can I export my teams? <span class="arrow">▼</span></div>
-    <div class="faq-a">Yes. After unlocking all teams, you can export all of them as a clean, formatted PDF. Each team can also be individually copied to your clipboard with one click.</div>
+    <div class="faq-q" onclick="toggleFaq(this)">Can I export my AI-generated teams? <span class="arrow">▼</span></div>
+    <div class="faq-a">Yes. After unlocking all teams, an "Export All as PDF" button appears. This downloads a clean, formatted PDF showing all 20 AI-generated teams — each with captain, vice-captain, all 11 players, roles, and risk levels.</div>
   </div>
   <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">Are these teams guaranteed to win? <span class="arrow">▼</span></div>
-    <div class="faq-a">No. FantasyXI is an informational and entertainment tool. Team performance depends on real match outcomes. Always play responsibly. FantasyXI does not guarantee any winnings.</div>
+    <div class="faq-q" onclick="toggleFaq(this)">Are AI-generated fantasy cricket teams guaranteed to win? <span class="arrow">▼</span></div>
+    <div class="faq-a">No. AI Fantasy Team Generator is an informational and entertainment tool. Performance in fantasy contests depends entirely on real match outcomes which no AI can predict with certainty. Always play responsibly.</div>
   </div>
-  <div class="faq-item">
-    <div class="faq-q" onclick="toggleFaq(this)">Is this site affiliated with Dream11, ICC, or BCCI? <span class="arrow">▼</span></div>
-    <div class="faq-a">No. FantasyXI is an independent tool. It is not affiliated with Dream11, ICC, BCCI, or any official cricket or fantasy sports organisation.</div>
-  </div>
-</section><!-- /content-section -->
+
+</section>
 
 """ + _FOOTER + _AD_MODAL + """
 
 <script>
 var selT1=null, selT2=null, selMID=null, selMode=null;
-var currentStep = 0;
 
-/* ── Step bar updater ── */
+/* 18+ Age Gate */
+(function() {
+  try {
+    if (localStorage.getItem('fantasyxi_age_ok') === '1') {
+      var gate = document.getElementById('ageGate');
+      if (gate) gate.style.display = 'none';
+    }
+  } catch(e) {}
+})();
+
+function ageConfirm(isAdult) {
+  var gate    = document.getElementById('ageGate');
+  var blocked = document.getElementById('ageBlocked');
+  if (isAdult) {
+    try { localStorage.setItem('fantasyxi_age_ok', '1'); } catch(e) {}
+    if (gate) {
+      gate.style.transition = 'opacity .3s';
+      gate.style.opacity = '0';
+      setTimeout(function() { gate.style.display = 'none'; }, 300);
+    }
+  } else {
+    if (gate)    gate.style.display    = 'none';
+    if (blocked) blocked.style.display = 'flex';
+  }
+}
+
+/* Step bar state */
 function setStep(n) {
-  currentStep = n;
   for (var i = 1; i <= 4; i++) {
     var el = document.getElementById('step' + i);
     if (!el) continue;
     el.classList.remove('done', 'active');
-    if (i < n) el.classList.add('done');
-    else if (i === n) el.classList.add('active');
+    if (i < n)  el.classList.add('done');
+    if (i === n) el.classList.add('active');
+  }
+}
+setStep(1);
+
+/* Tabs */
+function showTab(id, el) {
+  document.getElementById('tab-up').style.display  = id === 'up'  ? '' : 'none';
+  document.getElementById('tab-man').style.display = id === 'man' ? '' : 'none';
+  document.querySelectorAll('.tab-btn').forEach(function(b) {
+    b.classList.remove('active'); b.setAttribute('aria-selected', 'false');
+  });
+  el.classList.add('active'); el.setAttribute('aria-selected', 'true');
+}
+
+/* Collapse advanced panel */
+function toggleAdv(header) {
+  var body  = document.getElementById('advBody');
+  var arrow = header.querySelector('.adv-header-arrow');
+  var isOpen = arrow.classList.contains('open');
+  if (isOpen) {
+    body.style.display = 'none'; arrow.classList.remove('open');
+    header.setAttribute('aria-expanded', 'false');
+  } else {
+    body.style.display = ''; arrow.classList.add('open');
+    header.setAttribute('aria-expanded', 'true');
   }
 }
 
-function showTab(id, el) {
-  document.getElementById('tab-up').style.display = id==='up' ? '' : 'none';
-  document.getElementById('tab-man').style.display = id==='man' ? '' : 'none';
-  document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
-  el.classList.add('active');
-}
-
-/* Part 4: auto-scroll after match select */
+/* Match select → advance to step 2 */
 function selectMatch(id, t1, t2, date, venue, el) {
-  selMID=id; selT1=t1; selT2=t2;
-  document.querySelectorAll('.match-card').forEach(function(c){ c.classList.remove('selected'); });
+  selMID = id; selT1 = t1; selT2 = t2;
+  document.querySelectorAll('.match-card').forEach(function(c) { c.classList.remove('selected'); });
   el.classList.add('selected');
   var info = document.getElementById('selInfo');
   info.style.display = 'block';
   info.innerHTML = '✅ <strong>' + t1 + ' vs ' + t2 + '</strong> · ' + date + ' · 📍 ' + venue;
-  populatePlayerDropdowns(t1, t2);
+  populatePlayerChips(t1, t2);
   setStep(2);
-  setTimeout(function(){ scrollTo('section-mode'); }, 220);
+  setTimeout(function() { scrollToId('section-mode'); }, 260);
 }
 
 function setManual() {
   var t1 = document.getElementById('mt1').value;
   var t2 = document.getElementById('mt2').value;
-  if (t1===t2) { showToast('Please select two different teams!', '#f04f4f'); return; }
-  selT1=t1; selT2=t2; selMID='manual';
-  populatePlayerDropdowns(t1, t2);
+  if (t1 === t2) { showToast('Please select two different teams!', '#ff4d6d'); return; }
+  selT1 = t1; selT2 = t2; selMID = 'manual';
+  populatePlayerChips(t1, t2);
   setStep(2);
-  showToast('✅ Teams confirmed! Choose a mode below.', '#f0b429');
-  setTimeout(function(){ scrollTo('section-mode'); }, 220);
+  showToast('✅ Teams confirmed! Choose a mode.', '#f5c842');
+  setTimeout(function() { scrollToId('section-mode'); }, 260);
 }
 
-/* Part 4: auto-scroll after mode select */
+/* Mode select → advance to step 3 */
 function selectMode(m, el) {
   selMode = m;
-  document.querySelectorAll('.mode-card').forEach(function(c){ c.classList.remove('active'); c.setAttribute('aria-checked','false'); });
-  el.classList.add('active'); el.setAttribute('aria-checked','true');
+  document.querySelectorAll('.mode-card').forEach(function(c) {
+    c.classList.remove('active'); c.setAttribute('aria-checked', 'false');
+  });
+  el.classList.add('active'); el.setAttribute('aria-checked', 'true');
   setStep(3);
-  setTimeout(function(){ scrollTo('section-criteria'); }, 220);
+  setTimeout(function() { scrollToId('section-criteria'); }, 260);
 }
 
-/* ── Player dropdown population ── */
-/* allPlayers is keyed by team name, built from JSON data embedded below */
+/* Player chip picker */
 var allPlayers = {{ players_json|tojson }};
+var lockedIds = [], excludedIds = [];
 
-/* ── Chip picker state ── */
-var lockedIds  = [];   /* array of player IDs selected as locked  */
-var excludedIds = [];  /* array of player IDs selected as excluded */
-
-function populatePlayerDropdowns(t1, t2) {
-  var lockPicker = document.getElementById('lock_picker');
-  var exclPicker = document.getElementById('excl_picker');
-  if (!lockPicker || !exclPicker) return;
-
-  /* Reset state */
+function populatePlayerChips(t1, t2) {
   lockedIds = []; excludedIds = [];
-  updateSummary('lock');
-  updateSummary('excl');
-
+  updateSummary('lock'); updateSummary('excl');
   var teams = [
     { name: t1, players: (allPlayers[t1] || []).slice(0, 11) },
     { name: t2, players: (allPlayers[t2] || []).slice(0, 11) }
   ];
-
-  function buildPicker(container, type) {
+  function buildPicker(cid, type) {
+    var container = document.getElementById(cid);
+    if (!container) return;
     container.innerHTML = '';
     teams.forEach(function(team) {
-      /* Team label */
-      var lbl = document.createElement('div');
-      lbl.className = 'chip-team-lbl';
-      lbl.textContent = team.name;
+      var lbl = document.createElement('div'); lbl.className = 'chip-team-lbl'; lbl.textContent = team.name;
       container.appendChild(lbl);
-
-      /* Player chips */
-      var row = document.createElement('div');
-      row.className = 'chip-row';
+      var row = document.createElement('div'); row.className = 'chip-row';
       (team.players || []).forEach(function(p) {
         var chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'pchip';
-        chip.dataset.id   = p.id;
-        chip.dataset.name = p.name;
-        chip.dataset.type = type;
-        var roleShort = p.role.replace('Wicketkeeper-Batsman','WK')
-                              .replace('All-rounder','AR')
-                              .replace('Batsman','BAT')
-                              .replace('Bowler','BOWL');
-        chip.innerHTML = '<span class="pchip-name">' + p.name + '</span>'
-                       + '<span class="pchip-role">' + roleShort + '</span>';
+        chip.type = 'button'; chip.className = 'pchip';
+        chip.dataset.id = p.id; chip.dataset.name = p.name; chip.dataset.type = type;
+        var rs = p.role.replace('Wicketkeeper-Batsman','WK').replace('All-rounder','AR').replace('Batsman','BAT').replace('Bowler','BOWL');
+        chip.innerHTML = '<span class="pchip-name">' + p.name + '</span><span class="pchip-role">' + rs + '</span>';
         chip.onclick = function() { toggleChip(chip, type); };
         row.appendChild(chip);
       });
       container.appendChild(row);
     });
   }
-
-  buildPicker(lockPicker, 'lock');
-  buildPicker(exclPicker, 'excl');
+  buildPicker('lock_picker', 'lock');
+  buildPicker('excl_picker', 'excl');
 }
 
 function toggleChip(chip, type) {
-  var id   = chip.dataset.id;
-  var name = chip.dataset.name;
-  var arr  = (type === 'lock') ? lockedIds : excludedIds;
-  var otherArr = (type === 'lock') ? excludedIds : lockedIds;
-  var otherType = (type === 'lock') ? 'excl' : 'lock';
-
-  /* Can't be in both lists */
-  if (otherArr.indexOf(id) !== -1) {
-    showToast('⚠️ ' + name + ' is already in the other list.', '#f04f4f');
-    return;
-  }
-
+  var id = chip.dataset.id, name = chip.dataset.name;
+  var arr   = (type === 'lock') ? lockedIds : excludedIds;
+  var other = (type === 'lock') ? excludedIds : lockedIds;
+  if (other.indexOf(id) !== -1) { showToast('⚠️ ' + name + ' is already in the other list.', '#ff4d6d'); return; }
   var idx = arr.indexOf(id);
   if (idx === -1) {
     arr.push(id);
     chip.classList.add(type === 'lock' ? 'pchip--active' : 'pchip--active-excl');
   } else {
     arr.splice(idx, 1);
-    chip.classList.remove('pchip--active');
-    chip.classList.remove('pchip--active-excl');
+    chip.classList.remove('pchip--active', 'pchip--active-excl');
   }
-
-  /* Sync active class on the mirrored chip in the other picker */
   updateSummary(type);
 }
 
 function updateSummary(type) {
   var arr = (type === 'lock') ? lockedIds : excludedIds;
-  var summaryEl = document.getElementById(type + '_summary');
-  if (!summaryEl) return;
-  if (arr.length === 0) { summaryEl.innerHTML = ''; return; }
-  var activeClass = (type === 'lock') ? 'pchip--active' : 'pchip--active-excl';
+  var el  = document.getElementById(type + '_summary');
+  if (!el) return;
+  if (!arr.length) { el.innerHTML = ''; return; }
+  var cls = (type === 'lock') ? 'pchip--active' : 'pchip--active-excl';
   var names = [];
-  document.querySelectorAll('.pchip.' + activeClass + '[data-type="' + type + '"]').forEach(function(c) {
-    names.push(c.dataset.name);
-  });
-  var color = (type === 'lock') ? 'var(--grn)' : 'var(--red)';
-  summaryEl.innerHTML = '<span style="color:' + color + ';font-weight:600;">'
-    + (type === 'lock' ? '🔒' : '🚫') + ' ' + names.length + ' selected: </span>'
+  document.querySelectorAll('.pchip.' + cls + '[data-type="' + type + '"]').forEach(function(c) { names.push(c.dataset.name); });
+  var col = (type === 'lock') ? 'var(--grn)' : 'var(--red)';
+  el.innerHTML = '<span style="color:' + col + ';font-weight:700;">' + (type === 'lock' ? '🔒' : '🚫') + ' ' + names.length + ' selected: </span>'
     + '<span style="color:var(--txt2);">' + names.join(', ') + '</span>';
 }
 
-function getPickerIds(type) {
-  return (type === 'lock') ? lockedIds.slice() : excludedIds.slice();
-}
-
+/* Generate → advance to step 4 */
 function doGenerate() {
-  if (!selT1 || !selT2) { showToast('Please select a match first!', '#f04f4f'); return; }
-  if (!selMode)         { showToast('Please choose a generation mode!', '#f04f4f'); return; }
+  if (!selT1 || !selT2) { showToast('Please select a match first!', '#ff4d6d'); return; }
+  if (!selMode)          { showToast('Please choose a generation mode!', '#ff4d6d'); return; }
 
   var cr = {};
   ['c1','c6','c7','c8','c11','c12','c13','c14','c15'].forEach(function(k) {
-    var el = document.getElementById(k);
-    cr[k] = el ? el.checked : true;
+    var el = document.getElementById(k); cr[k] = el ? el.checked : true;
   });
 
   var adv = {
-    unique_cap:    document.getElementById('unique_cap') ? document.getElementById('unique_cap').checked : false,
-    unique_vc:     document.getElementById('unique_vc') ? document.getElementById('unique_vc').checked : false,
-    differential:  document.getElementById('differential') ? document.getElementById('differential').checked : false,
-    balanced_dist: document.getElementById('balanced_dist') ? document.getElementById('balanced_dist').checked : false,
-    exposure_pct:  parseInt(document.getElementById('exposure') ? document.getElementById('exposure').value : 75) || 75,
-    max_from_one:  parseInt(document.getElementById('max_from_one') ? document.getElementById('max_from_one').value : 7) || 7,
-    locked:        getPickerIds('lock'),
-    excluded:      getPickerIds('excl')
+    unique_cap:    !!(document.getElementById('unique_cap')||{}).checked,
+    unique_vc:     !!(document.getElementById('unique_vc')||{}).checked,
+    differential:  !!(document.getElementById('differential')||{}).checked,
+    balanced_dist: !!(document.getElementById('balanced_dist')||{}).checked,
+    exposure_pct:  parseInt(document.getElementById('exposure').value) || 75,
+    max_from_one:  parseInt(document.getElementById('max_from_one').value) || 7,
+    risk_intensity:(parseFloat(document.getElementById('risk_intensity').value) || 10) / 10,
+    rand_strength: (parseFloat(document.getElementById('rand_strength').value) || 5) / 10,
+    min_diff:      parseInt(document.getElementById('min_diff').value) || 0,
+    safe_core:     false,
+    locked:        lockedIds.slice(),
+    excluded:      excludedIds.slice()
   };
 
-  var payload = {
-    team1: selT1, team2: selT2, match_id: selMID, mode: selMode,
-    nt: Math.min(parseInt(document.getElementById('nt').value) || 20, 20),
-    cr: cr, adv: adv
-  };
+  var nt = Math.min(parseInt(document.getElementById('nt').value) || 20, 20);
+  var payload = { team1: selT1, team2: selT2, match_id: selMID, mode: selMode, nt: nt, cr: cr, adv: adv };
 
   setStep(4);
-  /* Show spinner and disable button */
   var spin = document.getElementById('spinnerOverlay');
-  var genBtn = document.getElementById('generateBtn');
+  var btn  = document.getElementById('generateBtn');
   if (spin) spin.classList.add('active');
-  if (genBtn) { genBtn.classList.add('btn-generating'); genBtn.textContent = 'Generating…'; }
+  if (btn)  { btn.disabled = true; btn.style.opacity = '.65'; btn.textContent = 'Generating…'; }
 
   var form = document.createElement('form');
   form.method = 'POST'; form.action = '/generate';
   var inp = document.createElement('input');
   inp.type = 'hidden'; inp.name = 'payload'; inp.value = JSON.stringify(payload);
   form.appendChild(inp); document.body.appendChild(form);
-  setTimeout(function(){ form.submit(); }, 120); /* brief delay so spinner renders */
+  setTimeout(function() { form.submit(); }, 150);
 }
 
 function resetAll() {
-  selT1=selT2=selMID=selMode=null;
-  lockedIds=[]; excludedIds=[];
-  document.querySelectorAll('.match-card').forEach(function(c){ c.classList.remove('selected'); });
-  document.querySelectorAll('.mode-card').forEach(function(c){ c.classList.remove('active'); });
+  selT1 = selT2 = selMID = selMode = null; lockedIds = []; excludedIds = [];
+  document.querySelectorAll('.match-card').forEach(function(c) { c.classList.remove('selected'); });
+  document.querySelectorAll('.mode-card').forEach(function(c) { c.classList.remove('active'); c.setAttribute('aria-checked','false'); });
   var info = document.getElementById('selInfo');
-  if (info) info.style.display='none';
-  var lock = document.getElementById('lock_picker');
-  var excl = document.getElementById('excl_picker');
-  if (lock) lock.innerHTML='<span class="chip-placeholder">Select a match first</span>';
-  if (excl) excl.innerHTML='<span class="chip-placeholder">Select a match first</span>';
-  var ls = document.getElementById('lock_summary');
-  var es = document.getElementById('excl_summary');
-  if (ls) ls.innerHTML=''; if (es) es.innerHTML='';
+  if (info) info.style.display = 'none';
+  ['lock_picker','excl_picker'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="chip-placeholder">Select a match first</span>';
+  });
+  ['lock_summary','excl_summary'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.innerHTML = '';
+  });
   setStep(1);
-  showToast('🔄 Reset complete. Select a match to start.', '#4fa3e0');
+  showToast('🔄 Reset complete. Select a match to start.', '#4db8ff');
+  scrollToId('tool');
 }
 </script>
 """ + _SHARED_JS + """
@@ -1582,14 +1839,15 @@ function resetAll() {
 </html>
 """
 
-# ─── RESULTS PAGE ─────────────────────────────────────────────────────────────
-# Part 1: Correct order: Free teams → Unlock banner → Locked teams (all in grid)
+# =============================================================================
+# ─── RESULTS PAGE ────────────────────────────────────────────────────────────
+# =============================================================================
 
 RESULTS_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>FantasyXI — {{team1}} vs {{team2}} · Generated Teams</title>
-<meta name="description" content="20 unique fantasy cricket teams for {{team1}} vs {{team2}}. ICC T20 World Cup 2026 Super 8s.">
+<title>AI Fantasy Team Generator — {{team1}} vs {{team2}} · {{teams|length}} Teams Generated</title>
+<meta name="description" content="{{teams|length}} AI-generated fantasy cricket teams for {{team1}} vs {{team2}}. {{mode|capitalize}} mode. AI Fantasy Team Generator.">
 <meta name="robots" content="noindex, nofollow">
 """ + _CSS + """
 </head>
@@ -1597,27 +1855,34 @@ RESULTS_PAGE = """<!DOCTYPE html>
 
 <header role="banner">
   <div class="logo-wrap">
-    <div class="logo" aria-label="FantasyXI">⚡ FantasyXI</div>
-    <span class="logo-badge">Super 8s · T20 WC 2026</span>
+    <a href="/" class="logo">⚡ AI Fantasy Team Generator</a>
   </div>
   <nav class="hdr-nav" aria-label="Results navigation">
-    <a href="/" aria-label="Go back to home">← Home</a>
-    <a href="/export_pdf" id="pdfBtn" {% if not unlocked %}style="display:none"{% endif %} class="cta" aria-label="Export all teams as PDF">📄 PDF</a>
+    <a href="/">← New Generation</a>
+    <a href="/export_pdf" id="pdfBtn" class="cta" {% if not unlocked %}style="display:none"{% endif %}>📄 Export PDF</a>
   </nav>
 </header>
 
-<!-- Success banner -->
-<div class="success-banner z1" role="status" aria-live="polite">
-  <span>✅</span>
-  <div>
-    <strong>{{teams|length}} Teams Generated Successfully!</strong>
-    <span class="success-sub">First 3 are free · Watch a short ad to unlock all {{teams|length - 3}} remaining teams</span>
+<!-- Step bar on results page — all steps done -->
+<div class="step-bar" aria-label="Progress steps">
+  <div class="step-bar-inner">
+    <div class="step done" id="step1"><div class="step-num">1</div><span class="step-lbl">Select Match</span><div class="step-line"></div></div>
+    <div class="step done" id="step2"><div class="step-num">2</div><span class="step-lbl">Choose Mode</span><div class="step-line"></div></div>
+    <div class="step done" id="step3"><div class="step-num">3</div><span class="step-lbl">Set Criteria</span><div class="step-line"></div></div>
+    <div class="step active" id="step4"><div class="step-num">4</div><span class="step-lbl">Generated ✓</span></div>
   </div>
 </div>
 
-<main class="wrap z1" aria-label="Generated teams results">
+<div class="success-banner z1" role="status">
+  <span>✅</span>
+  <div>
+    <strong>{{teams|length}} AI Teams Generated Successfully!</strong>
+    <span class="success-sub">First 3 are instantly free · Watch a 5-second ad to unlock all {{teams|length - 3}} remaining AI teams</span>
+  </div>
+</div>
 
-  <!-- Match strip -->
+<main class="wrap z1">
+
   <div class="match-strip">
     <div>
       <div class="strip-vs">{{team1}}<em>VS</em>{{team2}}</div>
@@ -1626,52 +1891,38 @@ RESULTS_PAGE = """<!DOCTYPE html>
     <div class="strip-right">
       <span class="pill pill-{{mode}}">{{mode|upper}}</span>
       <span class="pill pill-neutral">{{teams|length}} Teams</span>
+      <span class="pill pill-neutral">XI Only</span>
     </div>
   </div>
 
-  <!-- Stats -->
   <div class="stats-bar">
-    <div class="stat-chip"><strong>{{teams|length}}</strong><span>Total</span></div>
-    <div class="stat-chip"><strong>3</strong><span>Free</span></div>
+    <div class="stat-chip"><strong>{{teams|length}}</strong><span>Total Teams</span></div>
+    <div class="stat-chip"><strong>3</strong><span>Free Preview</span></div>
     <div class="stat-chip"><strong>{{teams|length - 3}}</strong><span>Locked</span></div>
-    <div class="stat-chip"><strong>{{unique_caps}}</strong><span>Captains</span></div>
+    <div class="stat-chip"><strong>{{unique_caps}}</strong><span>Captains Used</span></div>
     <div class="stat-chip"><strong>{{cv_combos}}</strong><span>C/VC Combos</span></div>
-    <div class="stat-chip"><strong>XI Only</strong><span>Pool</span></div>
+    <div class="stat-chip"><strong>XI Only</strong><span>Player Pool</span></div>
   </div>
 
   <div class="res-topbar">
-    <div class="sh" style="margin-bottom:0;">Generated Teams</div>
+    <div class="sh" style="margin-bottom:0;">Your Generated Teams</div>
     {% if unlocked %}
-    <a href="/export_pdf" class="btn btn-grn" style="font-size:.85rem;padding:9px 17px;">📄 Export PDF</a>
+    <a href="/export_pdf" class="btn btn-grn" style="font-size:.85rem;padding:9px 18px;">📄 Export All as PDF</a>
     {% endif %}
   </div>
 
-  <!-- ═══════════════════════════════════════════════════
-       PART 1 — CORRECT LAYOUT:
-       1. Free teams (1-3)
-       2. Unlock banner (full-width)
-       3. Locked teams (4-N)
-       All inside one CSS grid for correct placement.
-       ═══════════════════════════════════════════════════ -->
-
   <div class="team-grid" id="mainGrid">
 
-    <!-- FREE TEAMS (1-3) -->
+    <!-- FREE TEAMS 1–3 -->
     {% for t in teams[:3] %}
-    <div class="team-card fade-up" style="animation-delay:{{loop.index0 * 0.04}}s;">
+    <div class="team-card fade-up" style="animation-delay:{{loop.index0 * 0.05}}s;">
       <div class="team-hdr">
         <div class="team-num">Team {{loop.index}}</div>
         <span class="badge badge-free">FREE ✓</span>
       </div>
       <div class="cv-row">
-        <div class="cv-pill cv-c">
-          <span class="cv-lbl">Captain 2×</span>
-          <span class="cv-nm">{{t.captain}}</span>
-        </div>
-        <div class="cv-pill cv-vc">
-          <span class="cv-lbl">Vice Captain 1.5×</span>
-          <span class="cv-nm">{{t.vice_captain}}</span>
-        </div>
+        <div class="cv-pill cv-c"><span class="cv-lbl">Captain 2×</span><span class="cv-nm">{{t.captain}}</span></div>
+        <div class="cv-pill cv-vc"><span class="cv-lbl">Vice Captain 1.5×</span><span class="cv-nm">{{t.vice_captain}}</span></div>
       </div>
       <ul class="plist">
       {% for p in t.players %}
@@ -1695,31 +1946,34 @@ RESULTS_PAGE = """<!DOCTYPE html>
     </div>
     {% endfor %}
 
-    <!-- ─── UNLOCK BANNER (PART 1 — placed inline in grid after team 3) ─── -->
+    <!-- UNLOCK BANNER -->
     {% if not unlocked %}
-    <div class="unlock-banner fade-up" id="unlockBanner" style="animation-delay:.15s;">
-      <h3>🎬 Unlock All {{teams|length - 3}} Remaining Teams</h3>
-      <p>Watch one short 5-second simulated ad — no real ad SDK required.</p>
-      <button class="btn btn-ora btn-lg" onclick="openAd()">▶ Watch 1 Ad to Unlock All Teams</button>
+    <div class="unlock-banner fade-up" id="unlockBanner" style="animation-delay:.16s;">
+      <div class="unlock-count">🤖 {{teams|length - 3}} AI Teams Waiting</div>
+      <h3>Unlock All {{teams|length - 3}} Remaining AI Teams</h3>
+      <div class="unlock-perks">
+        <span class="unlock-perk">✅ Completely free</span>
+        <span class="unlock-perk">⏱ Takes 5 seconds</span>
+        <span class="unlock-perk">📋 Copy any team</span>
+        <span class="unlock-perk">📄 Export to PDF</span>
+      </div>
+      <p>Watch one short simulated 5-second ad — then all teams unlock instantly.</p>
+      <button class="btn btn-ora btn-xl" onclick="openAd()" id="watchAdBtn">
+        ▶ Watch 1 Ad → Unlock All Teams
+      </button>
     </div>
     {% endif %}
 
-    <!-- LOCKED TEAMS (4-N) -->
+    <!-- LOCKED TEAMS 4–N -->
     {% for t in teams[3:] %}
-    <div class="team-card fade-up" style="animation-delay:{{(loop.index + 3) * 0.03}}s;">
+    <div class="team-card fade-up" style="animation-delay:{{(loop.index + 2) * 0.03}}s;">
       <div class="team-hdr">
         <div class="team-num">Team {{loop.index + 3}}</div>
         <span class="badge badge-lock">🔒 LOCKED</span>
       </div>
       <div class="cv-row">
-        <div class="cv-pill cv-c">
-          <span class="cv-lbl">Captain 2×</span>
-          <span class="cv-nm">{{t.captain}}</span>
-        </div>
-        <div class="cv-pill cv-vc">
-          <span class="cv-lbl">Vice Captain 1.5×</span>
-          <span class="cv-nm">{{t.vice_captain}}</span>
-        </div>
+        <div class="cv-pill cv-c"><span class="cv-lbl">Captain 2×</span><span class="cv-nm">{{t.captain}}</span></div>
+        <div class="cv-pill cv-vc"><span class="cv-lbl">Vice Captain 1.5×</span><span class="cv-nm">{{t.vice_captain}}</span></div>
       </div>
       <ul class="plist">
       {% for p in t.players %}
@@ -1739,17 +1993,16 @@ RESULTS_PAGE = """<!DOCTYPE html>
       <div class="card-foot">
         <div class="foot-info">{{t.from_t1}} {{team1}} · {{t.from_t2}} {{team2}}</div>
         {% if not unlocked %}
-          <button class="copy-btn" onclick="copyTeam({{loop.index + 2}})" disabled>📋 Copy</button>
+        <button class="copy-btn" disabled>📋 Copy</button>
         {% else %}
-          <button class="copy-btn" onclick="copyTeam({{loop.index + 2}})">📋 Copy</button>
+        <button class="copy-btn" onclick="copyTeam({{loop.index + 2}})">📋 Copy</button>
         {% endif %}
       </div>
-
       {% if not unlocked %}
       <div class="lock-ov">
         <div class="lock-ico">🔒</div>
         <div class="lock-lbl">LOCKED</div>
-        <div class="lock-sub">Watch ad to unlock</div>
+        <div class="lock-sub">Watch ad to unlock instantly</div>
       </div>
       {% endif %}
     </div>
@@ -1758,184 +2011,165 @@ RESULTS_PAGE = """<!DOCTYPE html>
   </div><!-- /team-grid -->
 
   {% if unlocked %}
-  <div style="text-align:center;margin:32px 0;">
-    <a href="/export_pdf" class="btn btn-grn btn-lg">📄 Export All {{teams|length}} Teams as PDF</a>
+  <div style="text-align:center;margin:36px 0;">
+    <a href="/export_pdf" class="btn btn-grn btn-xl">📄 Export All {{teams|length}} Teams as PDF</a>
   </div>
   {% endif %}
 
-</main><!-- /results -->
+  <div style="text-align:center;margin-top:22px;">
+    <a href="/" class="btn btn-ghost">← Generate New Teams</a>
+  </div>
+
+</main>
 
 """ + _FOOTER + _AD_MODAL + _SHARED_JS + """
 </body>
 </html>
 """
 
-# ─── LEGAL PAGES ──────────────────────────────────────────────────────────────
+# =============================================================================
+# ─── LEGAL PAGES ─────────────────────────────────────────────────────────────
+# =============================================================================
 
 def legal_wrap(title, body):
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
-<title>""" + title + """ — FantasyXI</title>
+<title>""" + title + """ — AI Fantasy Team Generator</title>
 <meta name="robots" content="index, follow">
 """ + _CSS + """
 </head>
 <body>
 <header>
   <div class="logo-wrap">
-    <div class="logo">⚡ FantasyXI</div>
-    <span class="logo-badge">T20 WC 2026</span>
+    <a href="/" class="logo">⚡ AI Fantasy Team Generator</a>
   </div>
   <nav class="hdr-nav">
-    <a href="/">← Home</a><a href="/about">About</a><a href="/contact">Contact</a>
+    <a href="/">← Home</a>
+    <a href="/about">About</a>
+    <a href="/contact">Contact</a>
   </nav>
 </header>
 <div class="legal-wrap z1">""" + body + """</div>
 """ + _FOOTER + """
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+function showToast(msg,col){ var t=document.getElementById('toast'); if(!t)return; t.textContent=msg; t.style.background=col||'#00e5a0'; t.style.color='#000'; t.classList.add('show'); setTimeout(function(){t.classList.remove('show');},3000); }
+</script>
 </body>
 </html>"""
 
 PRIVACY_BODY = """
 <h1>Privacy Policy</h1>
-<p class="last-updated">Last updated: January 2026</p>
+<p class="last-updated">Last updated: February 2026</p>
 <h2>Introduction</h2>
-<p>FantasyXI ("we", "our", "us") is committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website.</p>
+<p>AI Fantasy Team Generator ("we", "our", "us") is committed to protecting your personal information and your right to privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website at fantasyxi.in.</p>
 <h2>Information We Collect</h2>
-<p>We may collect information about you in a variety of ways. The information we may collect includes:</p>
+<p>We may collect the following categories of information:</p>
 <ul>
-  <li><strong>Log and Usage Data:</strong> Server logs, IP addresses, browser type, pages visited, and time of visit.</li>
-  <li><strong>Cookies and Tracking Technologies:</strong> We use cookies and similar tracking technologies to improve your experience. You can control cookies through your browser settings.</li>
-  <li><strong>Contact Form Data:</strong> If you contact us via our contact form, we collect your name, email address, and message content.</li>
+  <li><strong>Log and Usage Data:</strong> Server logs, IP addresses, browser type, pages visited, referring URL, and time of visit.</li>
+  <li><strong>Cookies and Tracking Technologies:</strong> We and our advertising partners use cookies and similar tracking technologies.</li>
+  <li><strong>Contact Form Data:</strong> If you contact us, we collect your name, email address, subject, and message content.</li>
+  <li><strong>Session Data:</strong> Temporary session data is stored server-side to maintain your generated teams within a browsing session.</li>
 </ul>
-<h2>How We Use Your Information</h2>
-<p>We use the information we collect to operate and maintain our website, improve and expand our services, understand and analyse usage patterns, and respond to your enquiries.</p>
 <h2>Google AdSense and Third-Party Advertising</h2>
-<p>FantasyXI uses Google AdSense to display advertisements. Google AdSense uses cookies to serve ads based on your prior visits to this website or other websites. You may opt out of personalised advertising by visiting <a href="https://www.google.com/settings/ads" target="_blank" rel="noopener">Google Ad Settings</a>.</p>
-<p>Third-party vendors, including Google, use cookies to serve ads based on your prior visits to our website. Google's use of the DoubleClick cookie enables it and its partners to serve ads based on your visits to this and other sites.</p>
-<h2>Cookies Policy</h2>
-<p>Cookies are small text files stored on your device. We use session cookies (to remember your generated teams within a session), analytics cookies (to understand usage), and advertising cookies (Google AdSense for relevant advertising).</p>
-<p>You can instruct your browser to refuse all cookies or indicate when a cookie is being sent. However, some portions of our site may not function properly without cookies.</p>
-<h2>Third-Party Links</h2>
-<p>Our website may contain links to third-party sites. We have no control over and assume no responsibility for the content, privacy policies, or practices of any third-party sites.</p>
+<p>AI Fantasy Team Generator uses Google AdSense to display advertisements. Google AdSense uses cookies to serve ads based on your prior visits to this website or other websites. You may opt out of personalised advertising by visiting <a href="https://www.google.com/settings/ads" target="_blank" rel="noopener">Google Ad Settings</a>.</p>
 <h2>Children's Privacy</h2>
-<p>FantasyXI is intended for users aged 18 and over. We do not knowingly collect personally identifiable information from anyone under the age of 18.</p>
-<h2>Data Security</h2>
-<p>We use appropriate technical and organisational measures to protect your personal information. However, no method of transmission over the Internet is 100% secure.</p>
-<h2>Changes to This Policy</h2>
-<p>We may update our Privacy Policy from time to time. We will notify you by updating the "Last updated" date at the top of this page.</p>
+<p>This website is intended for users aged 18 and over. We do not knowingly collect personally identifiable information from anyone under the age of 18.</p>
 <h2>Contact Us</h2>
-<p>If you have questions, contact us at: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a> or via our <a href="/contact">Contact page</a>.</p>
+<p>If you have questions about this Privacy Policy, contact us at: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a> or via our <a href="/contact">Contact page</a>.</p>
 """
 
 TERMS_BODY = """
 <h1>Terms &amp; Conditions</h1>
-<p class="last-updated">Last updated: January 2026</p>
+<p class="last-updated">Last updated: February 2026</p>
 <h2>Acceptance of Terms</h2>
-<p>By accessing and using FantasyXI ("the website"), you accept and agree to be bound by the terms and provision of this agreement. If you do not agree to these terms, please do not use our website.</p>
-<h2>Use of Service</h2>
-<p>FantasyXI provides a fantasy cricket team generator tool for informational and entertainment purposes only. You agree to use this service only for lawful purposes and in accordance with these Terms.</p>
-<p>You agree not to use automated means to scrape content, interfere with or disrupt the integrity of the website, attempt to gain unauthorised access to any portion of the website, or use the service in any way that violates applicable laws or regulations.</p>
+<p>By accessing and using AI Fantasy Team Generator ("the website", "the service"), you accept and agree to be bound by these Terms and Conditions.</p>
 <h2>Age Restriction</h2>
 <p>This website is intended for users who are 18 years of age or older. By using this site, you represent and warrant that you are at least 18 years old.</p>
 <h2>No Guarantee of Winnings</h2>
-<p>FantasyXI is a team suggestion and educational tool. We do not guarantee any winnings in fantasy sports platforms. Fantasy sports involve risk and outcomes depend on real-world sporting events outside our control.</p>
+<p>AI Fantasy Team Generator is a team suggestion and educational tool only. We make no guarantee regarding any financial outcomes arising from the use of our generated teams in fantasy sports contests.</p>
 <h2>Intellectual Property</h2>
-<p>The content, design, and functionality of FantasyXI are the intellectual property of FantasyXI. Player names and match data used for informational purposes are property of their respective rights holders. FantasyXI is not affiliated with Dream11, ICC, BCCI, or any other official body.</p>
-<h2>Disclaimer of Warranties</h2>
-<p>The service is provided on an "AS IS" and "AS AVAILABLE" basis without any warranties of any kind.</p>
-<h2>Limitation of Liability</h2>
-<p>In no event shall FantasyXI, its directors, employees, or agents be liable for any indirect, incidental, special, consequential, or punitive damages arising out of your use of the service.</p>
+<p>AI Fantasy Team Generator is not affiliated with, authorised by, or associated with Dream11, MyTeam11, ICC, BCCI, or any other official body.</p>
 <h2>Governing Law</h2>
-<p>These Terms shall be governed and construed in accordance with the laws of India, without regard to its conflict of law provisions.</p>
+<p>These Terms shall be governed and construed in accordance with the laws of India.</p>
 <h2>Contact</h2>
 <p>For any questions regarding these Terms, please contact us at <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a>.</p>
 """
 
 ABOUT_BODY = """
-<h1>About FantasyXI</h1>
-<p class="last-updated">Your trusted ICC T20 World Cup 2026 fantasy team generator</p>
+<h1>About AI Fantasy Team Generator</h1>
+<p class="last-updated">India's #1 AI Fantasy Team Generator for cricket — IPL, T20 World Cup, ICC tournaments and all major leagues</p>
 
 <div class="about-grid">
-  <div class="about-card"><div class="about-icon">⚡</div><h3>Smart Engine</h3><p>Advanced distribution algorithm ensures 20 unique, optimised teams with no duplicates.</p></div>
-  <div class="about-card"><div class="about-icon">🏆</div><h3>Super 8s Coverage</h3><p>All Super 8 stage matches of ICC T20 World Cup 2026, with updated confirmed squads.</p></div>
-  <div class="about-card"><div class="about-icon">📊</div><h3>Data-Driven</h3><p>Risk-level weighting, role constraints, C/VC rotation, exposure limits — all automated.</p></div>
-  <div class="about-card"><div class="about-icon">🔒</div><h3>Privacy First</h3><p>No login required. No personal data stored beyond session. Transparent and clean.</p></div>
+  <div class="about-card"><div class="about-icon">🤖</div><h3>AI-Powered Engine</h3><p>Multi-layer AI distribution algorithm generates 20 unique, optimised teams with zero duplicates and valid role constraints — every single time.</p></div>
+  <div class="about-card"><div class="about-icon">🏆</div><h3>All Tournaments</h3><p>Full support for IPL, T20 World Cup, ICC ODI World Cup, Big Bash, The Hundred, SA20, CPL and all international cricket series.</p></div>
+  <div class="about-card"><div class="about-icon">📊</div><h3>Data-Driven</h3><p>AI risk-weighted player sampling, C/VC rotation intelligence, exposure limits, lock/exclude controls — all fully automated.</p></div>
+  <div class="about-card"><div class="about-icon">🔒</div><h3>Privacy First</h3><p>No login required. No personal data permanently stored. Session data only. Fully AdSense compliant and transparent.</p></div>
+  <div class="about-card"><div class="about-icon">📱</div><h3>Mobile Ready</h3><p>Fully responsive AI team generator optimised for mobile, tablet, and desktop.</p></div>
+  <div class="about-card"><div class="about-icon">🆓</div><h3>Always Free</h3><p>The first 3 AI-generated teams are always free. Full access unlocks by watching a 5-second ad. No payment ever required.</p></div>
 </div>
 
 <h2>Our Mission</h2>
-<p>FantasyXI was created to help fantasy cricket enthusiasts efficiently generate diversified fantasy teams for ICC T20 World Cup 2026 Super 8s matches. Instead of spending hours manually creating teams, our smart engine does it in seconds — applying proven distribution rules used by top fantasy players.</p>
-
-<h2>What Makes FantasyXI Different?</h2>
-<p>Unlike basic random generators, FantasyXI's engine enforces role constraints ensuring every team has the correct WK/BAT/AR/BOWL balance, produces no duplicate teams, distributes C/VC intelligently across different players and roles, offers risk mode weighting so Safe, Balanced, and Risky modes produce genuinely different output, and only ever selects from confirmed playing XI players.</p>
+<p>AI Fantasy Team Generator was built to give fantasy cricket players of all skill levels access to a professional-grade AI fantasy team generator. Instead of spending hours manually creating teams, our AI engine applies proven distribution algorithms — automatically generating 20 optimised, diverse Dream11 teams for any cricket match in seconds.</p>
 
 <h2>Disclaimer</h2>
-<p>FantasyXI is an independent, informational tool. It is not affiliated with Dream11, MyTeam11, ICC, BCCI, or any official cricket or fantasy sports organisation. All player names and match data are used for informational and educational purposes only. Fantasy sports involve risk — please play responsibly and within your means.</p>
-
-<p>For questions or feedback, please visit our <a href="/contact">Contact page</a>.</p>
+<p>AI Fantasy Team Generator is an independent AI informational tool. It is not affiliated with Dream11, MyTeam11, ICC, BCCI, or any official cricket or fantasy sports organisation. Fantasy sports involve financial risk — please play responsibly. This tool is for users aged 18 and above.</p>
+<p>Questions or feedback? Visit our <a href="/contact">Contact page</a>.</p>
 """
 
 HOW_BODY = """
-<h1>How FantasyXI Works</h1>
-<p class="last-updated">A step-by-step guide to generating your optimised fantasy teams</p>
+<h1>How AI Fantasy Team Generator Works</h1>
+<p class="last-updated">A complete step-by-step guide to generating AI-powered fantasy cricket teams</p>
 
 <h2>Step 1 — Select a Match</h2>
-<p>From the home page, choose any upcoming ICC T20 World Cup 2026 Super 8s match from the match cards. Each card shows the two teams, date, time, and venue. Alternatively, use Manual Selection to pick any two teams from the full squad database.</p>
+<p>From the home page, choose any upcoming cricket match from the match cards. Clicking a card confirms your selection and automatically scrolls you to the AI Mode selection. You can also use the Manual Selection tab to choose any two teams for any match not listed.</p>
 
-<h2>Step 2 — Choose a Generation Mode</h2>
-<p>Select one of three modes based on your contest strategy. Safe mode weights low-risk players heavily and always picks captains from low-risk players only — ideal for small contests or head-to-head matchups where consistency matters most. Balanced mode mixes low and medium risk, good for mid-size contests. Risky mode weights high-risk differential players heavily, best for large tournaments where you need to stand out from the crowd.</p>
+<h2>Step 2 — Choose an AI Generation Mode</h2>
+<p><strong>Safe mode</strong> weights low-risk players heavily — ideal for small contests. <strong>Balanced mode</strong> mixes low and medium risk, ideal for mid-size contests. <strong>Risky mode</strong> focuses on high-risk differentials, best for IPL grand leagues and mega contests.</p>
 
-<h2>Step 3 — Configure Advanced Criteria</h2>
-<p>Fine-tune the distribution engine with advanced options. Set the number of teams, control player exposure limits (max % of teams a player can appear in), set max players from one team, enable unique C/VC per team rules, lock specific players to appear in every team, exclude specific players entirely, and enable differential inclusion for the last 10 teams.</p>
+<h2>Step 3 — Configure AI Criteria (Optional)</h2>
+<p>Fine-tune the AI with advanced options: set team count (up to 20), control player exposure limits, lock specific players, exclude specific players, enable differential injection, and more.</p>
 
-<h2>Step 4 — Generate &amp; Review</h2>
-<p>Click "Generate Teams." The engine produces up to 20 unique teams instantly. The first 3 are immediately visible and free. The remaining teams can be unlocked by watching a short 5-second simulated ad — no payment required.</p>
+<h2>Step 4 — Generate AI Teams and Review</h2>
+<p>Click "Generate AI Teams." The AI produces unique fantasy lineups in seconds. The first 3 teams are immediately free. Watch a 5-second simulated ad to unlock all remaining teams instantly.</p>
 
 <h2>Step 5 — Copy or Export</h2>
-<p>Each team card has a one-click Copy button to copy the team (C, VC, all 11 players) to your clipboard. After unlocking, you can also export all teams as a formatted PDF.</p>
-
-<h2>Role Constraints Explained</h2>
-<p>Every generated team satisfies these fantasy platform role rules: 1–4 Wicketkeeper-Batsmen, 3–6 Batsmen, 1–4 All-rounders, 3–6 Bowlers, and a maximum of 7 players from either team (configurable via Advanced Criteria).</p>
-
-<h2>Understanding Risk Levels</h2>
-<p>Each player in the squad database has an assigned risk level. Low Risk players are consistent, established performers likely to score in most conditions. Medium Risk players have good potential but some variance in output. High Risk players are differentials — high ceiling but less consistent, great for large contests where you need separation from the field.</p>
+<p>Each team card has a one-click Copy button. After unlocking, export all teams as a clean formatted PDF for offline reference.</p>
 """
 
 DISCLAIMER_BODY = """
 <h1>Disclaimer</h1>
-<p class="last-updated">Last updated: January 2026</p>
+<p class="last-updated">Last updated: February 2026</p>
 <h2>General Disclaimer</h2>
-<p>The information provided by FantasyXI on this website is for general informational and entertainment purposes only. All information is provided in good faith; however, we make no representation or warranty of any kind, express or implied, regarding the accuracy, adequacy, validity, reliability, availability, or completeness of any information on the site.</p>
+<p>All information provided by AI Fantasy Team Generator on this website is for general informational and entertainment purposes only.</p>
 <h2>Fantasy Sports Disclaimer</h2>
-<p>Fantasy sports involve an element of financial risk and may be addictive. Please play responsibly and at your own risk. FantasyXI does not guarantee any winnings. Outcomes in fantasy platforms depend entirely on real sporting events which we cannot predict or control.</p>
-<p>Check the legality of fantasy sports in your state/country before participating in paid contests. Fantasy sports for cash prizes may be restricted or prohibited in some jurisdictions.</p>
+<p>Fantasy sports involve an element of financial risk and may be habit-forming. Please play responsibly and within your means. AI Fantasy Team Generator does not guarantee any winnings.</p>
 <h2>Affiliation Disclaimer</h2>
-<p>FantasyXI is an independent website and is not affiliated with, authorised by, maintained, sponsored, or endorsed by Dream11, MyTeam11, ICC, BCCI, or any other fantasy platform or cricket governing body.</p>
-<h2>External Links</h2>
-<p>FantasyXI may contain links to external websites. We have no control over the content of those sites and accept no responsibility for them or for any loss or damage that may arise from your use of them.</p>
+<p>AI Fantasy Team Generator is an entirely independent website and is not affiliated with, authorised by, maintained, sponsored, or endorsed by Dream11, MyTeam11, ICC, BCCI, or any other fantasy sports platform or cricket governing body.</p>
 <h2>18+ Notice</h2>
-<p>This website is intended for users aged 18 and above. Minors should not participate in paid fantasy sports contests.</p>
+<p>This website is strictly intended for users aged 18 and above.</p>
 <h2>Contact</h2>
-<p>If you have any questions about this Disclaimer, contact us at <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a>.</p>
+<p>Questions about this Disclaimer? Contact us at <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a>.</p>
 """
 
 CONTACT_BODY = """
 <h1>Contact Us</h1>
-<p class="last-updated">We'd love to hear from you — feedback, bug reports, or partnerships.</p>
+<p class="last-updated">We'd love to hear from you — feedback, bug reports, or partnership enquiries.</p>
 
 <h2>Get in Touch</h2>
-<p>📧 Email: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
-<p>We aim to respond within 48 hours on working days.</p>
+<p>📧 Direct Email: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
+<p>We aim to respond to all enquiries within 48 business hours.</p>
 
 <h2>Send a Message</h2>
-<form class="contact-form" onsubmit="submitForm(event)">
+<form class="contact-form" onsubmit="submitForm(event)" novalidate>
   <div class="form-group">
     <label for="cf-name">Your Name *</label>
-    <input type="text" id="cf-name" placeholder="Rahul Sharma" required>
+    <input type="text" id="cf-name" placeholder="Rahul Sharma" required autocomplete="name">
   </div>
   <div class="form-group">
     <label for="cf-email">Email Address *</label>
-    <input type="email" id="cf-email" placeholder="rahul@example.com" required>
+    <input type="email" id="cf-email" placeholder="rahul@example.com" required autocomplete="email">
   </div>
   <div class="form-group">
     <label for="cf-subject">Subject</label>
@@ -1943,6 +2177,7 @@ CONTACT_BODY = """
       <option>General Enquiry</option>
       <option>Bug Report</option>
       <option>Feature Request</option>
+      <option>Data / Squad Update</option>
       <option>Partnership / Advertising</option>
       <option>Other</option>
     </select>
@@ -1951,34 +2186,36 @@ CONTACT_BODY = """
     <label for="cf-msg">Message *</label>
     <textarea id="cf-msg" placeholder="Your message here..." required></textarea>
   </div>
-  <button type="submit" class="btn btn-gold">Send Message →</button>
+  <button type="submit" class="btn btn-gold btn-lg">Send Message →</button>
 </form>
-<div class="form-msg" id="formMsg">✅ Thank you! Your message has been received. We'll get back to you within 48 hours.</div>
-
+<div class="form-msg" id="formMsg">✅ Thank you! Your message has been received. We'll get back to you within 48 business hours.</div>
 <script>
 function submitForm(e) {
   e.preventDefault();
-  var name=document.getElementById('cf-name').value;
-  var email=document.getElementById('cf-email').value;
-  var msg=document.getElementById('cf-msg').value;
-  if (!name||!email||!msg) return;
+  var name=document.getElementById('cf-name').value.trim();
+  var email=document.getElementById('cf-email').value.trim();
+  var msg=document.getElementById('cf-msg').value.trim();
+  if (!name || !email || !msg) { showToast('Please fill in all required fields.','#ff4d6d'); return; }
+  if (!email.includes('@')) { showToast('Please enter a valid email address.','#ff4d6d'); return; }
   document.querySelector('.contact-form').style.display='none';
   document.getElementById('formMsg').style.display='block';
+  showToast('Message sent successfully!','#00e5a0');
 }
 </script>
 """
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
+# =============================================================================
+# ─── ROUTES ──────────────────────────────────────────────────────────────────
+# =============================================================================
 
 @app.route("/")
 def home():
     td = load_teams()
     md = load_matches()
-    # Build {team_name: [players]} dict for JS dropdowns
     players_json = {t["team"]: t["players"][:11] for t in td["teams"]}
     return render_template_string(
         HOME_PAGE,
-        tournament=td.get("tournament", "ICC T20 WC 2026"),
+        tournament=td.get("tournament", "AI Fantasy Team Generator"),
         matches=md["matches"],
         all_teams=td["teams"],
         players_json=players_json,
@@ -2012,8 +2249,10 @@ def generate():
             if m["match_id"] == match_id:
                 venue = m.get("venue", ""); break
 
-    session["gen"] = {"teams": teams, "team1": team1, "team2": team2,
-                      "mode": mode, "venue": venue}
+    session["gen"] = {
+        "teams": teams, "team1": team1, "team2": team2,
+        "mode": mode, "venue": venue
+    }
     session["unlocked"] = False
 
     return render_template_string(
@@ -2041,11 +2280,11 @@ def export_pdf():
                                         Table, TableStyle, HRFlowable, PageBreak)
         from reportlab.lib.styles import ParagraphStyle
     except ImportError:
-        return "pip install reportlab --break-system-packages", 500
+        return "reportlab not installed. Run: pip install reportlab --break-system-packages", 500
 
     gen = session.get("gen", {})
     teams = gen.get("teams", [])
-    if not teams: return "No teams in session.", 400
+    if not teams: return "No teams in session. Please generate teams first.", 400
 
     team1    = gen.get("team1", "T1")
     team2    = gen.get("team2", "T2")
@@ -2053,11 +2292,11 @@ def export_pdf():
     venue    = gen.get("venue", "")
     unlocked = session.get("unlocked", False)
 
-    GOLD = colors.HexColor("#f0b429")
-    DARK = colors.HexColor("#141926")
+    GOLD  = colors.HexColor("#f5c842")
+    DARK  = colors.HexColor("#141926")
     DARK2 = colors.HexColor("#0c1220")
     MUTED = colors.HexColor("#64748b")
-    WHT = colors.white
+    WHT   = colors.white
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -2065,55 +2304,56 @@ def export_pdf():
                             topMargin=1.8*cm, bottomMargin=1.8*cm)
 
     def S(n, **kw): return ParagraphStyle(n, **kw)
-    sT  = S("t",  fontSize=20, textColor=GOLD, fontName="Helvetica-Bold", alignment=1, spaceAfter=4)
-    sS  = S("s",  fontSize=9,  textColor=MUTED, alignment=1, spaceAfter=5)
-    sTH = S("th", fontSize=13, textColor=GOLD, fontName="Helvetica-Bold", spaceAfter=5)
-    sCV = S("cv", fontSize=9,  textColor=WHT, spaceAfter=4)
-    sFT = S("ft", fontSize=7.5, textColor=MUTED, spaceBefore=3)
+    sT   = S("t",  fontSize=22, textColor=GOLD, fontName="Helvetica-Bold", alignment=1, spaceAfter=4)
+    sS   = S("s",  fontSize=9,  textColor=MUTED, alignment=1, spaceAfter=4)
+    sTH  = S("th", fontSize=14, textColor=GOLD, fontName="Helvetica-Bold", spaceAfter=5, spaceBefore=4)
+    sCV  = S("cv", fontSize=9,  textColor=WHT, spaceAfter=5)
+    sFT  = S("ft", fontSize=7.5, textColor=MUTED, spaceBefore=3)
 
     story = []
-    story.append(Paragraph("FantasyXI", sT))
-    story.append(Paragraph("ICC Men's T20 World Cup 2026 - Super 8s", sS))
-    story.append(Paragraph(f"{team1} VS {team2}  |  {mode} Mode  |  Playing XI Only", sS))
-    if venue: story.append(Paragraph(f"Venue: {venue}", sS))
-    story.append(Spacer(1, .2*cm))
-    story.append(HRFlowable(width="100%", thickness=1, color=GOLD))
-    story.append(Spacer(1, .4*cm))
+    story.append(Paragraph("AI Fantasy Team Generator", sT))
+    story.append(Paragraph("fantasyxi.in", sS))
+    story.append(Paragraph(f"{team1} VS {team2}  ·  {mode} Mode  ·  Playing XI Only", sS))
+    if venue: story.append(Paragraph(f"📍 {venue}", sS))
+    story.append(Spacer(1, .25*cm))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=GOLD))
+    story.append(Spacer(1, .5*cm))
 
     max_idx = len(teams) if unlocked else 3
     for idx, t in enumerate(teams[:max_idx]):
         story.append(Paragraph(f"Team {idx+1}", sTH))
         story.append(Paragraph(
-            f"<b><font color='#f0b429'>Captain (2x):</font></b> {t['captain']}     "
-            f"<b><font color='#4fa3e0'>VC (1.5x):</font></b> {t['vice_captain']}", sCV))
+            f"<b><font color='#f5c842'>Captain (2×):</font></b>  {t['captain']}     "
+            f"<b><font color='#4db8ff'>Vice Captain (1.5×):</font></b>  {t['vice_captain']}", sCV))
         rows = [["#", "Player", "Role", "Risk"]]
-        for pi, p in enumerate(t["players"]):
-            tag = " (C)" if p["name"] == t["captain"] else (" (VC)" if p["name"] == t["vice_captain"] else "")
-            rows.append([str(pi+1), p["name"]+tag, p["role"], p["risk_level"]])
+        for pi, player in enumerate(t["players"]):
+            tag = " (C)" if player["name"] == t["captain"] else (" (VC)" if player["name"] == t["vice_captain"] else "")
+            rows.append([str(pi+1), player["name"]+tag, player["role"], player["risk_level"]])
         tbl = Table(rows, colWidths=[.7*cm, 7*cm, 4.5*cm, 2.5*cm])
         tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,0), DARK2), ("TEXTCOLOR", (0,0), (-1,0), GOLD),
-            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"), ("FONTSIZE", (0,0), (-1,-1), 8.5),
-            ("TEXTCOLOR", (0,1), (-1,-1), WHT),
-            ("ROWBACKGROUNDS", (0,1), (-1,-1), [DARK, colors.HexColor("#18202e")]),
-            ("GRID", (0,0), (-1,-1), .3, colors.HexColor("#2a2b45")),
-            ("ALIGN", (0,0), (0,-1), "CENTER"),
-            ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-            ("LEFTPADDING", (0,0), (-1,-1), 6),
+            ("BACKGROUND",    (0,0), (-1,0), DARK2),
+            ("TEXTCOLOR",     (0,0), (-1,0), GOLD),
+            ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE",      (0,0), (-1,-1), 8.5),
+            ("TEXTCOLOR",     (0,1), (-1,-1), WHT),
+            ("ROWBACKGROUNDS",(0,1), (-1,-1), [DARK, colors.HexColor("#18202e")]),
+            ("GRID",          (0,0), (-1,-1), .3, colors.HexColor("#2a2b45")),
+            ("ALIGN",         (0,0), (0,-1), "CENTER"),
+            ("TOPPADDING",    (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+            ("LEFTPADDING",   (0,0), (-1,-1), 7),
         ]))
         story.append(tbl)
-        story.append(Paragraph(f"{t['from_t1']} from {team1} | {t['from_t2']} from {team2}", sFT))
-        story.append(Spacer(1, .5*cm))
+        story.append(Paragraph(f"{t['from_t1']} from {team1}  |  {t['from_t2']} from {team2}", sFT))
+        story.append(Spacer(1, .55*cm))
         if (idx+1) % 2 == 0 and idx < max_idx-1:
             story.append(PageBreak())
 
     doc.build(story)
     buf.seek(0)
     return send_file(buf, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"FantasyXI_{team1}_vs_{team2}.pdf")
+                     download_name=f"AIFantasyTeamGenerator_{team1}_vs_{team2}_{mode}.pdf")
 
-
-# ─── Legal & Info pages ───────────────────────────────────────────────────────
 
 @app.route("/privacy")
 def privacy():
@@ -2139,8 +2379,6 @@ def disclaimer():
 def contact():
     return legal_wrap("Contact Us", CONTACT_BODY)
 
-
-# ─── SEO files ────────────────────────────────────────────────────────────────
 
 @app.route("/robots.txt")
 def robots():
@@ -2175,8 +2413,6 @@ def sitemap():
 </urlset>"""
     return Response(xml, mimetype="application/xml")
 
-
-# ─── Run ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
