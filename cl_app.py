@@ -1061,6 +1061,14 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gld); outline-o
 }
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9904803540658016" crossorigin="anonymous"></script>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VJS4H89EKW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-VJS4H89EKW');
+</script>
 """
 
 # ─── Footer ───────────────────────────────────────────────────────────────────
@@ -1216,7 +1224,7 @@ function doUnlock() {
         banner.innerHTML =
           '<div class="unlock-count" style="position:relative;">ALL ' + total + ' TEAMS UNLOCKED</div>'
           + '<h3 style="color:var(--grn);position:relative;">✅ Fully Unlocked!</h3>'
-          + '<p style="position:relative;color:var(--txt2);">Enjoy all your generated teams. Download a clean PDF below.</p>'
+          + '<p style="position:relative;color:var(--txt2);;">Enjoy all your generated teams. Download a clean PDF below.</p>'
           + '<div style="position:relative;margin-top:4px;">'
           + '<a href="/export_pdf" class="btn btn-grn btn-lg">📄 Export All as PDF</a></div>';
       }
@@ -1258,6 +1266,14 @@ function copyTeam(idx) {
 HOME_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VJS4H89EKW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-VJS4H89EKW');
+</script>
 <title>AI Fantasy Team Generator — AI 20 Fantasy Cricket Teams | Dream11, IPL, T20 World Cup</title>
 <meta name="description" content="AI Fantasy Team Generator is the #1 AI Cricket Team Generator. Generate 20 unique Dream11 AI teams for IPL, T20 World Cup, ICC tournaments and all major leagues. Smart algorithm, Safe/Balanced/Risky modes — 100% free.">
 <meta name="keywords" content="AI fantasy team generator, dream11 AI team, fantasy cricket AI, AI cricket team prediction, dream11 team generator, IPL fantasy team, T20 World Cup fantasy, ICC fantasy cricket, fantasy XI generator, AI fantasy cricket 2026">
@@ -1846,6 +1862,14 @@ function resetAll() {
 RESULTS_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VJS4H89EKW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-VJS4H89EKW');
+</script>
 <title>AI Fantasy Team Generator — {{team1}} vs {{team2}} · {{teams|length}} Teams Generated</title>
 <meta name="description" content="{{teams|length}} AI-generated fantasy cricket teams for {{team1}} vs {{team2}}. {{mode|capitalize}} mode. AI Fantasy Team Generator.">
 <meta name="robots" content="noindex, nofollow">
@@ -2035,6 +2059,14 @@ def legal_wrap(title, body):
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VJS4H89EKW"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-VJS4H89EKW');
+</script>
 <title>""" + title + """ — AI Fantasy Team Generator</title>
 <meta name="robots" content="index, follow">
 """ + _CSS + """
