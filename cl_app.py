@@ -3,13 +3,74 @@
 # Supports IPL, T20 World Cup, ICC tournaments, and all major cricket leagues
 # =============================================================================
 
-import json, random, hashlib, io, datetime
+import json, random, hashlib, io, datetime, smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from flask import (Flask, render_template_string, request,
                    jsonify, send_file, session, Response)
 from collections import defaultdict
 
 app = Flask(__name__)
 app.secret_key = "fantasyxi_t20wc_2026_sk_v3"
+
+# ─── Email Configuration ──────────────────────────────────────────────────────
+# Uses Gmail SMTP with App Password (NOT your regular Gmail password).
+# Steps to get App Password:
+#   1. Go to myaccount.google.com → Security → 2-Step Verification (enable it)
+#   2. Then go to myaccount.google.com → Security → App Passwords
+#   3. Generate a password for "Mail" → copy the 16-character code
+#   4. Paste it below as SMTP_PASSWORD
+SMTP_HOST     = "smtp.gmail.com"
+SMTP_PORT     = 587
+SMTP_USER     = "tehm81111@gmail.com"   # your Gmail address
+SMTP_PASSWORD = "YOUR_APP_PASSWORD_HERE" # 16-char Gmail App Password
+EMAIL_TO      = "tehm81111@gmail.com"   # inbox to receive messages
+
+def send_contact_email(name, email, subject, message):
+    """Send contact form submission to EMAIL_TO via Gmail SMTP."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[FantasyXI Contact] {subject} — from {name}"
+        msg["From"]    = SMTP_USER
+        msg["To"]      = EMAIL_TO
+        msg["Reply-To"] = email
+
+        html_body = f"""
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#0f1220;color:#e2e8f8;border-radius:12px;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,#f5c842,#d4a212);padding:18px 28px;">
+            <h2 style="margin:0;color:#000;font-size:1.3rem;">⚡ New Contact Form Submission</h2>
+            <p style="margin:4px 0 0;color:#222;font-size:.85rem;">AI Fantasy Team Generator — fantasyxi.in</p>
+          </div>
+          <div style="padding:28px;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr><td style="padding:8px 0;color:#8896b8;font-size:.8rem;width:100px;">Name</td><td style="padding:8px 0;font-weight:600;">{name}</td></tr>
+              <tr><td style="padding:8px 0;color:#8896b8;font-size:.8rem;">Email</td><td style="padding:8px 0;"><a href="mailto:{email}" style="color:#f5c842;">{email}</a></td></tr>
+              <tr><td style="padding:8px 0;color:#8896b8;font-size:.8rem;">Subject</td><td style="padding:8px 0;">{subject}</td></tr>
+            </table>
+            <div style="margin-top:20px;background:#131728;border-radius:8px;padding:18px;border-left:3px solid #f5c842;">
+              <p style="margin:0 0 8px;color:#8896b8;font-size:.75rem;text-transform:uppercase;letter-spacing:1px;">Message</p>
+              <p style="margin:0;line-height:1.7;white-space:pre-wrap;">{message}</p>
+            </div>
+            <p style="margin-top:20px;font-size:.75rem;color:#4a5578;">
+              Reply directly to this email to respond to {name}.<br>
+              Sent from fantasyxi.in contact form.
+            </p>
+          </div>
+        </div>
+        """
+        text_body = f"New contact form submission\n\nName: {name}\nEmail: {email}\nSubject: {subject}\n\nMessage:\n{message}"
+
+        msg.attach(MIMEText(text_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, EMAIL_TO, msg.as_string())
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
 
 # ─── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -1970,11 +2031,11 @@ CONTACT_BODY = """
 <p class="last-updated">We'd love to hear from you — feedback, bug reports, or partnership enquiries.</p>
 
 <h2>Get in Touch</h2>
-<p>📧 Direct Email: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
+<p>📧 Direct Email: <a href="mailto:tehem81111@gmail.com">tehem81111@gmail.com</a></p>
 <p>We aim to respond to all enquiries within 48 business hours.</p>
 
 <h2>Send a Message</h2>
-<form class="contact-form" onsubmit="submitForm(event)" novalidate>
+<form class="contact-form" id="contactForm" onsubmit="submitForm(event)" novalidate>
   <div class="form-group">
     <label for="cf-name">Your Name *</label>
     <input type="text" id="cf-name" placeholder="Rahul Sharma" required autocomplete="name">
@@ -1998,20 +2059,63 @@ CONTACT_BODY = """
     <label for="cf-msg">Message *</label>
     <textarea id="cf-msg" placeholder="Your message here..." required></textarea>
   </div>
-  <button type="submit" class="btn btn-gold btn-lg">Send Message →</button>
+  <button type="submit" class="btn btn-gold btn-lg" id="submitBtn">Send Message →</button>
 </form>
-<div class="form-msg" id="formMsg">✅ Thank you! Your message has been received. We'll get back to you within 48 business hours.</div>
+
+<div class="form-msg" id="formMsg" style="display:none;">
+  ✅ Thank you! Your message has been received. We'll get back to you within 48 business hours.
+</div>
+
+<div id="formError" style="display:none;background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.25);border-radius:8px;padding:13px 16px;font-size:.82rem;color:#ff4d6d;margin-top:12px;"></div>
+
 <script>
 function submitForm(e) {
   e.preventDefault();
-  var name=document.getElementById('cf-name').value.trim();
-  var email=document.getElementById('cf-email').value.trim();
-  var msg=document.getElementById('cf-msg').value.trim();
-  if (!name || !email || !msg) { showToast('Please fill in all required fields.','#ff4d6d'); return; }
-  if (!email.includes('@')) { showToast('Please enter a valid email address.','#ff4d6d'); return; }
-  document.querySelector('.contact-form').style.display='none';
-  document.getElementById('formMsg').style.display='block';
-  showToast('Message sent successfully!','#00e5a0');
+
+  var name    = document.getElementById('cf-name').value.trim();
+  var email   = document.getElementById('cf-email').value.trim();
+  var subject = document.getElementById('cf-subject').value;
+  var msg     = document.getElementById('cf-msg').value.trim();
+  var errBox  = document.getElementById('formError');
+  var btn     = document.getElementById('submitBtn');
+
+  errBox.style.display = 'none';
+
+  if (!name || !email || !msg) {
+    showToast('Please fill in all required fields.', '#ff4d6d'); return;
+  }
+  if (!email.includes('@')) {
+    showToast('Please enter a valid email address.', '#ff4d6d'); return;
+  }
+
+  // Show loading state
+  btn.disabled = true;
+  btn.textContent = '⏳ Sending…';
+
+  fetch('/send_contact', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, email: email, subject: subject, message: msg })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (d.success) {
+      document.getElementById('contactForm').style.display = 'none';
+      document.getElementById('formMsg').style.display     = 'block';
+      showToast('✅ Message sent successfully!', '#00e5a0');
+    } else {
+      errBox.textContent    = '❌ ' + (d.error || 'Something went wrong. Please try again.');
+      errBox.style.display  = 'block';
+      btn.disabled          = false;
+      btn.textContent       = 'Send Message →';
+    }
+  })
+  .catch(function() {
+    errBox.textContent   = '❌ Network error. Please check your connection and try again.';
+    errBox.style.display = 'block';
+    btn.disabled         = false;
+    btn.textContent      = 'Send Message →';
+  });
 }
 </script>
 """
@@ -2190,6 +2294,28 @@ def disclaimer():
 @app.route("/contact")
 def contact():
     return legal_wrap("Contact Us", CONTACT_BODY)
+
+
+@app.route("/send_contact", methods=["POST"])
+def send_contact():
+    """API endpoint called by the contact form via fetch()."""
+    data    = request.get_json(silent=True) or {}
+    name    = data.get("name", "").strip()
+    email   = data.get("email", "").strip()
+    subject = data.get("subject", "General Enquiry").strip()
+    message = data.get("message", "").strip()
+
+    if not name or not email or not message:
+        return jsonify({"success": False, "error": "Missing required fields"}), 400
+    if "@" not in email:
+        return jsonify({"success": False, "error": "Invalid email address"}), 400
+
+    ok, err = send_contact_email(name, email, subject, message)
+    if ok:
+        return jsonify({"success": True})
+    else:
+        print(f"[Email Error] {err}")
+        return jsonify({"success": False, "error": "Failed to send email. Please try again later."}), 500
 
 
 @app.route("/robots.txt")
