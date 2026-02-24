@@ -494,6 +494,466 @@ header {
 .mode-card.safe     .mode-name { color: var(--grn); }
 .mode-card.balanced .mode-name { color: var(--blu); }
 .mode-card.risky    .mode-name { color: var(--red); }
+.mode-desc { font-size: .7rem; col    if mode == "safe":
+        return {"Low": 5, "Medium": 2, "High": 0.5}[r]
+    elif mode == "balanced":
+        return {"Low": 3, "Medium": 4, "High": 2}[r]
+    else:
+        return {"Low": 1.5, "Medium": 3, "High": 6}[r]
+
+def roles_ok(players):
+    roles = [p["role"] for p in players]
+    wk   = roles.count("Wicketkeeper-Batsman")
+    bat  = roles.count("Batsman")
+    ar   = roles.count("All-rounder")
+    bowl = roles.count("Bowler")
+    return (1 <= wk <= 4) and (3 <= bat <= 6) and (1 <= ar <= 4) and (3 <= bowl <= 6)
+
+def gen_teams(team1, team2, mode, cr, nt=20, adv=None):
+    if adv is None: adv = {}
+    xi1, _ = get_xi(team1)
+    xi2, _ = get_xi(team2)
+
+    locked_ids   = set(adv.get("locked", []))
+    excluded_ids = set(adv.get("excluded", []))
+    max_from_one = int(adv.get("max_from_one", 7))
+    exposure_pct = float(adv.get("exposure_pct", 75)) / 100.0
+    risk_intensity = float(adv.get("risk_intensity", 1.0))
+    rand_strength  = float(adv.get("rand_strength", 0.5))
+    min_diff       = int(adv.get("min_diff", 0))
+    safe_core      = adv.get("safe_core", False)
+
+    pool1 = [p for p in xi1 if p["id"] not in excluded_ids]
+    pool2 = [p for p in xi2 if p["id"] not in excluded_ids]
+
+    appear   = defaultdict(int)
+    cap_cnt  = defaultdict(int)
+    vc_cnt   = defaultdict(int)
+    cv_pairs = set()
+    th_set   = set()
+    last_cap = []
+    result   = []
+
+    def cap_pool(players):
+        if mode == "safe":
+            e = [p for p in players if p["risk_level"] == "Low"]
+        elif mode == "balanced":
+            e = [p for p in players if p["risk_level"] in ("Low", "Medium")]
+        else:
+            e = players[:]
+        return e or players[:]
+
+    def pick_unique(pool, weights, n, locked):
+        locked_players = [p for p in pool if p["id"] in locked]
+        free_pool = [p for p in pool if p["id"] not in locked]
+        free_weights = [w for p, w in zip(pool, weights) if p["id"] not in locked]
+
+        need = n - len(locked_players)
+        if need < 0: locked_players = locked_players[:n]
+        need = max(need, 0)
+
+        seen = [p["id"] for p in locked_players]
+        out  = locked_players[:]
+
+        if need > 0 and free_pool:
+            adj_weights = [w * (1 + rand_strength * (random.random() - 0.5)) for w in (free_weights or [1]*len(free_pool))]
+            adj_weights = [max(w, 0.01) for w in adj_weights]
+            tries = random.choices(free_pool, weights=adj_weights,
+                                   k=min(len(free_pool), need * 6))
+            for p in tries:
+                if p["id"] not in seen:
+                    if appear[p["id"]] >= int(nt * exposure_pct): continue
+                    seen.append(p["id"]); out.append(p)
+                if len(out) == n: break
+            rest = [p for p in free_pool if p["id"] not in seen]
+            random.shuffle(rest)
+            for p in rest:
+                if len(out) == n: break
+                out.append(p); seen.append(p["id"])
+        return out
+
+    for idx in range(nt):
+        valid = False; attempts = 0
+        captain = vice_captain = None
+        sel1 = sel2 = []
+
+        while not valid and attempts < 400:
+            attempts += 1
+            n1, n2 = (6, 5) if (cr.get("c1", True) and idx % 2 == 0) else (5, 6)
+
+            w1 = [risk_weight(p, mode) * risk_intensity for p in pool1]
+            w2 = [risk_weight(p, mode) * risk_intensity for p in pool2]
+
+            if adv.get("differential", False) and idx >= 10:
+                w1 = [w * max(0.5, 1 - appear[p["id"]] / max(nt, 1)) for p, w in zip(pool1, w1)]
+                w2 = [w * max(0.5, 1 - appear[p["id"]] / max(nt, 1)) for p, w in zip(pool2, w2)]
+
+            if min_diff > 0 and idx >= 5:
+                low_appear1 = sorted(pool1, key=lambda p: appear[p["id"]])[:min_diff]
+                low_appear2 = sorted(pool2, key=lambda p: appear[p["id"]])[:min_diff]
+                for p in low_appear1 + low_appear2:
+                    locked_ids.add(p["id"])
+
+            sel1 = pick_unique(pool1, w1, n1, locked_ids)
+            sel2 = pick_unique(pool2, w2, n2, locked_ids)
+
+            if min_diff > 0 and idx >= 5:
+                for p in low_appear1 + low_appear2:
+                    locked_ids.discard(p["id"])
+                for lid in adv.get("locked", []):
+                    locked_ids.add(lid)
+
+            if len(sel1) != n1 or len(sel2) != n2: continue
+            players = sel1 + sel2
+
+            if cr.get("c14", True) and not roles_ok(players): continue
+
+            max_one = max_from_one if adv.get("max_from_one") else 7
+            if cr.get("c13", True) and (len(sel1) > max_one or len(sel2) > max_one): continue
+
+            h = hash_team([p["id"] for p in players])
+            if cr.get("c12", True) and h in th_set: continue
+
+            cp = cap_pool(players)
+            def cw(p):
+                b = risk_weight(p, mode) * risk_intensity
+                b /= (1 + cap_cnt[p["id"]] * 0.5)
+                return max(b, 0.05)
+            cws = [cw(p) for p in cp]
+
+            if cr.get("c11", True) and len(last_cap) >= 3 and len(set(last_cap[-3:])) == 1:
+                forb = last_cap[-3]
+                alt = [(p, w) for p, w in zip(cp, cws) if p["id"] != forb]
+                if alt:
+                    cp, cws = zip(*alt); cp, cws = list(cp), list(cws)
+
+            captain = random.choices(cp, weights=cws, k=1)[0]
+
+            if cr.get("c15", True) and idx < 5:
+                ar_done = any(
+                    any(p["id"] == cid and p["role"] == "All-rounder" for p in players)
+                    for cid in cap_cnt
+                )
+                if not ar_done and idx == 4:
+                    arc = [p for p in cp if p["role"] == "All-rounder"]
+                    if arc: captain = random.choice(arc)
+
+            if safe_core and idx < 5:
+                low_risk = [p for p in cp if p.get("risk_level") == "Low"]
+                if low_risk: captain = sorted(low_risk, key=lambda p: cap_cnt[p["id"]])[0]
+
+            vp = [p for p in players if p["id"] != captain["id"]]
+            if not vp: continue
+            def vw(p):
+                b = risk_weight(p, mode)
+                b /= (1 + vc_cnt[p["id"]] * 0.3)
+                return max(b, 0.05)
+            vws = [vw(p) for p in vp]
+            if cr.get("c7", True):
+                alt = [(p, w) for p, w in zip(vp, vws) if (captain["id"], p["id"]) not in cv_pairs]
+                if alt:
+                    vp, vws = zip(*alt); vp, vws = list(vp), list(vws)
+
+            vice_captain = random.choices(vp, weights=vws, k=1)[0]
+            cv = (captain["id"], vice_captain["id"])
+            if cr.get("c6", True) and len(cv_pairs) < 5 and len(result) >= 5:
+                if cv in cv_pairs and attempts < 150: continue
+
+            if adv.get("unique_cap", False):
+                if captain["id"] in [r.get("_cap_id") for r in result]: continue
+            if adv.get("unique_vc", False):
+                if vice_captain["id"] in [r.get("_vc_id") for r in result]: continue
+
+            valid = True
+            th_set.add(h); cv_pairs.add(cv)
+            cap_cnt[captain["id"]] += 1
+            vc_cnt[vice_captain["id"]] += 1
+            last_cap.append(captain["id"])
+            for p in players: appear[p["id"]] += 1
+
+        result.append({
+            "players":     (sel1 + sel2) if (sel1 or sel2) else [],
+            "captain":     captain["name"] if captain else "—",
+            "vice_captain": vice_captain["name"] if vice_captain else "—",
+            "_cap_id":     captain["id"] if captain else None,
+            "_vc_id":      vice_captain["id"] if vice_captain else None,
+            "from_t1":     len(sel1),
+            "from_t2":     len(sel2),
+        })
+
+    return result, len(cap_cnt), len(cv_pairs)
+
+
+# =============================================================================
+# ─── SHARED CSS ──────────────────────────────────────────────────────────────
+# =============================================================================
+
+_CSS = """
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#060810">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════
+   DESIGN SYSTEM — Premium Dark Gold
+   Fonts: Barlow Condensed (display) + DM Sans (body)
+   ══════════════════════════════════════════════ */
+:root {
+  --bg:   #060810;
+  --s1:   #0b0e1c;
+  --s2:   #0f1220;
+  --s3:   #131728;
+  --s4:   #181c30;
+  --s5:   #1e2238;
+  --brd:  #1d2140;
+  --brd2: #2a3060;
+  --brd3: #374070;
+  --gld:      #f5c842;
+  --gld2:     #d4a212;
+  --gld3:     #fad96a;
+  --gld-glow: rgba(245,200,66,.15);
+  --gld-dim:  rgba(245,200,66,.08);
+  --ora: #ff7043;
+  --grn: #00e5a0;
+  --blu: #4db8ff;
+  --red: #ff4d6d;
+  --pur: #a78bfa;
+  --cyn: #22d3ee;
+  --txt:  #e2e8f8;
+  --txt2: #8896b8;
+  --txt3: #4a5578;
+  --txt4: #2d3555;
+  --r:  14px;
+  --r2: 10px;
+  --r3: 8px;
+  --shadow: 0 8px 32px rgba(0,0,0,.6);
+  --shadow2: 0 2px 12px rgba(0,0,0,.4);
+  --glow-gld: 0 0 30px rgba(245,200,66,.12), 0 0 60px rgba(245,200,66,.06);
+  /* Fixed bar heights */
+  --hdr-h:  58px;
+  --step-h: 52px;
+}
+
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-size: 15px;
+  line-height: 1.65;
+  /* Push content below fixed header + fixed step bar */
+  padding-top: calc(var(--hdr-h) + var(--step-h));
+}
+
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -5%, rgba(245,200,66,.05), transparent 60%),
+    radial-gradient(ellipse 40% 30% at 85% 110%, rgba(77,184,255,.04), transparent 50%),
+    linear-gradient(rgba(255,255,255,.008) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.008) 1px, transparent 1px);
+  background-size: 100%, 100%, 56px 56px, 56px 56px;
+}
+.z1 { position: relative; z-index: 1; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: var(--s1); }
+::-webkit-scrollbar-thumb { background: var(--brd3); border-radius: 3px; }
+
+/* ══════════════════════════
+   HEADER — Fixed
+   ══════════════════════════ */
+header {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 900;
+  height: var(--hdr-h);
+  background: rgba(6,8,16,.97);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid var(--brd);
+  display: flex; align-items: center;
+  padding: 0 32px;
+}
+.logo-wrap { display: flex; align-items: center; }
+.logo {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.25rem; font-weight: 800;
+  letter-spacing: 2px; white-space: nowrap;
+  background: linear-gradient(135deg, var(--gld3) 0%, var(--gld) 40%, var(--ora) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  text-decoration: none;
+}
+.logo-badge {
+  font-size: .56rem; color: var(--txt3); letter-spacing: 1.5px; text-transform: uppercase;
+  background: var(--s3); border: 1px solid var(--brd); padding: 3px 9px; border-radius: 6px;
+}
+.hdr-nav { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.hdr-nav a {
+  color: var(--txt2); text-decoration: none; font-size: .82rem; font-weight: 500;
+  padding: 6px 14px; border-radius: 8px; border: 1px solid transparent;
+  transition: all .18s; letter-spacing: .2px;
+}
+.hdr-nav a:hover { color: var(--txt); background: var(--s2); border-color: var(--brd); }
+.hdr-nav a.cta {
+  background: linear-gradient(135deg, var(--gld), var(--gld2));
+  color: #000; border-color: transparent; font-weight: 700; letter-spacing: .8px;
+  margin-left: 8px; padding: 7px 18px;
+}
+.hdr-nav a.cta:hover {
+  box-shadow: 0 4px 16px var(--gld-glow); transform: translateY(-1px);
+}
+
+/* ══════════════════════════
+   STICKY STEP PROGRESS BAR
+   Fixed directly below header
+   ══════════════════════════ */
+.step-bar {
+  position: fixed;
+  top: var(--hdr-h);
+  left: 0; right: 0;
+  z-index: 850;
+  height: var(--step-h);
+  background: rgba(11,14,28,.98);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--brd);
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 32px;
+}
+.step-bar-inner {
+  display: flex; align-items: center;
+  width: 100%; max-width: 680px;
+}
+.step {
+  display: flex; align-items: center; gap: 8px; flex: 1;
+}
+.step-num {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid var(--brd2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Barlow Condensed', sans-serif; font-size: .75rem; font-weight: 800;
+  color: var(--txt3); flex-shrink: 0; transition: all .3s;
+}
+.step-lbl {
+  font-size: .7rem; color: var(--txt3); transition: color .3s;
+  white-space: nowrap; font-weight: 500;
+}
+.step-line {
+  flex: 1; height: 1px; background: var(--brd); margin: 0 6px;
+  transition: background .3s;
+}
+/* Done state */
+.step.done .step-num {
+  background: var(--grn); border-color: var(--grn); color: #000;
+}
+.step.done .step-lbl  { color: var(--grn); }
+.step.done .step-line { background: var(--grn); }
+/* Active state */
+.step.active .step-num {
+  background: var(--gld); border-color: var(--gld); color: #000;
+  box-shadow: 0 0 0 3px rgba(245,200,66,.22), 0 0 14px rgba(245,200,66,.18);
+}
+.step.active .step-lbl { color: var(--gld); font-weight: 600; }
+
+@media(max-width:500px) {
+  .step-lbl { display: none; }
+  .step-line { margin: 0 3px; }
+  .step-bar  { padding: 0 16px; }
+}
+
+/* ══════════════════════════
+   LAYOUT
+   ══════════════════════════ */
+.wrap { max-width: 1200px; margin: 0 auto; padding: 26px 20px 90px; }
+
+.sh {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1rem; font-weight: 700;
+  letter-spacing: 2.5px; text-transform: uppercase;
+  color: var(--gld); margin-bottom: 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.sh::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--brd2), transparent);
+}
+.sh small { font-size: .62rem; color: var(--txt3); letter-spacing: 1px; font-weight: 400; }
+
+.tab-bar {
+  display: flex; gap: 3px; background: var(--s1); border: 1px solid var(--brd);
+  border-radius: 11px; padding: 4px; width: fit-content; margin-bottom: 20px;
+}
+.tab-btn {
+  padding: 7px 18px; border-radius: 8px; border: none; background: transparent;
+  color: var(--txt3); font-family: 'DM Sans', sans-serif; font-size: .8rem; font-weight: 500;
+  cursor: pointer; transition: all .2s; letter-spacing: .3px;
+}
+.tab-btn.active {
+  background: var(--s3); color: var(--txt); border: 1px solid var(--brd2);
+  box-shadow: var(--shadow2);
+}
+
+.match-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
+  gap: 10px; margin-bottom: 26px;
+}
+.match-card {
+  background: var(--s2); border: 1px solid var(--brd); border-radius: var(--r);
+  padding: 16px 18px 14px; cursor: pointer; transition: all .22s;
+  position: relative; overflow: hidden;
+}
+.match-card::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(245,200,66,.04), transparent 60%);
+  opacity: 0; transition: opacity .22s;
+}
+.match-card:hover { border-color: rgba(245,200,66,.45); transform: translateY(-3px); box-shadow: var(--shadow); }
+.match-card:hover::before { opacity: 1; }
+.match-card.selected {
+  border-color: var(--gld); background: var(--gld-dim);
+  box-shadow: 0 0 0 1px var(--gld), var(--shadow);
+}
+.match-time {
+  position: absolute; top: 10px; right: 10px;
+  background: rgba(245,200,66,.1); border: 1px solid rgba(245,200,66,.2);
+  color: var(--gld); font-size: .58rem; font-weight: 700;
+  padding: 2px 8px; border-radius: 100px; letter-spacing: .8px;
+}
+.match-id-tag { font-size: .6rem; color: var(--txt3); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 8px; }
+.match-vs {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.45rem; font-weight: 800;
+  letter-spacing: 1px; text-align: center; line-height: 1.1;
+}
+.match-vs em { color: var(--gld); font-style: normal; margin: 0 8px; font-size: .85rem; font-weight: 400; }
+.match-venue { font-size: .63rem; color: var(--txt3); text-align: center; margin-top: 6px; }
+
+.mode-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 26px; }
+@media(max-width:580px) { .mode-grid { grid-template-columns:1fr; } }
+.mode-card {
+  border-radius: var(--r); padding: 22px 16px; text-align: center;
+  cursor: pointer; border: 2px solid transparent; transition: all .25s;
+  position: relative; overflow: hidden;
+}
+.mode-card::after {
+  content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity .25s;
+  background: radial-gradient(ellipse at top, rgba(255,255,255,.04), transparent);
+}
+.mode-card:hover::after { opacity: 1; }
+.mode-card.safe    { background: linear-gradient(145deg,#04110d,#051410); border-color: rgba(0,229,160,.18); }
+.mode-card.balanced{ background: linear-gradient(145deg,#040f1e,#060f1e); border-color: rgba(77,184,255,.18); }
+.mode-card.risky   { background: linear-gradient(145deg,#130408,#170508); border-color: rgba(255,77,109,.18); }
+.mode-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+.mode-card.active.safe    { border-color: var(--grn); box-shadow: 0 0 40px rgba(0,229,160,.12); }
+.mode-card.active.balanced{ border-color: var(--blu); box-shadow: 0 0 40px rgba(77,184,255,.12); }
+.mode-card.active.risky   { border-color: var(--red); box-shadow: 0 0 40px rgba(255,77,109,.12); }
+.mode-icon { font-size: 2rem; margin-bottom: 9px; }
+.mode-name {
+  font-family: 'Barlow Condensed', sans-serif; font-size: 1.3rem; font-weight: 800; letter-spacing: 2px;
+}
+.mode-card.safe     .mode-name { color: var(--grn); }
+.mode-card.balanced .mode-name { color: var(--blu); }
+.mode-card.risky    .mode-name { color: var(--red); }
 .mode-desc { font-size: .7rem; color: var(--txt3); margin-top: 5px; line-height: 1.5; }
 .mode-note {
   font-size: .62rem; margin-top: 8px; padding: 3px 10px; border-radius: 6px;
@@ -2448,3 +2908,4 @@ def sitemap():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
