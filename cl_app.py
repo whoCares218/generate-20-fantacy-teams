@@ -22,9 +22,9 @@ app.secret_key = "fantasyxi_t20wc_2026_sk_v3"
 #   4. Paste it below as SMTP_PASSWORD
 SMTP_HOST     = "smtp.gmail.com"
 SMTP_PORT     = 587
-SMTP_USER     = "tehem81111@gmail.com"  # your Gmail address
+SMTP_USER     = "tehm8111@gmail.com"  # your Gmail address
 SMTP_PASSWORD = "idkl poic jbvh ysou"  # 16-char Gmail App Password
-EMAIL_TO      = "tehem81111@gmail.com"  # inbox to receive messages
+EMAIL_TO      = "tehm8111@gmail.com"  # inbox to receive messages
 
 def _smtp_send(name, email, subject, message):
     """Runs in background thread — never blocks the HTTP response."""
