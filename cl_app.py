@@ -23,7 +23,7 @@ app.secret_key = "fantasyxi_t20wc_2026_sk_v3"
 SMTP_HOST     = "smtp.gmail.com"
 SMTP_PORT     = 587
 SMTP_USER     = "tehm81111@gmail.com"   # your Gmail address
-SMTP_PASSWORD = "YOUR_APP_PASSWORD_HERE" # 16-char Gmail App Password
+SMTP_PASSWORD = "idkl poic jbvh ysou" # 16-char Gmail App Password
 EMAIL_TO      = "tehm81111@gmail.com"   # inbox to receive messages
 
 def send_contact_email(name, email, subject, message):
