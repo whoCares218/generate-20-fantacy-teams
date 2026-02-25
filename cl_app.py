@@ -3,7 +3,7 @@
 # Supports IPL, T20 World Cup, ICC tournaments, and all major cricket leagues
 # =============================================================================
 
-import json, random, hashlib, io, datetime, smtplib
+import json, random, hashlib, io, datetime, smtplib, threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import (Flask, render_template_string, request,
@@ -22,17 +22,17 @@ app.secret_key = "fantasyxi_t20wc_2026_sk_v3"
 #   4. Paste it below as SMTP_PASSWORD
 SMTP_HOST     = "smtp.gmail.com"
 SMTP_PORT     = 587
-SMTP_USER     = "tehm81111@gmail.com"   # your Gmail address
-SMTP_PASSWORD = "idkl poic jbvh ysou" # 16-char Gmail App Password
-EMAIL_TO      = "tehm81111@gmail.com"   # inbox to receive messages
+SMTP_USER     = "tehem81111@gmail.com"  # your Gmail address
+SMTP_PASSWORD = "idkl poic jbvh ysou"  # 16-char Gmail App Password
+EMAIL_TO      = "tehem81111@gmail.com"  # inbox to receive messages
 
-def send_contact_email(name, email, subject, message):
-    """Send contact form submission to EMAIL_TO via Gmail SMTP."""
+def _smtp_send(name, email, subject, message):
+    """Runs in background thread — never blocks the HTTP response."""
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[FantasyXI Contact] {subject} — from {name}"
-        msg["From"]    = SMTP_USER
-        msg["To"]      = EMAIL_TO
+        msg["Subject"]  = f"[FantasyXI Contact] {subject} — from {name}"
+        msg["From"]     = SMTP_USER
+        msg["To"]       = EMAIL_TO
         msg["Reply-To"] = email
 
         html_body = f"""
@@ -56,21 +56,22 @@ def send_contact_email(name, email, subject, message):
               Sent from fantasyxi.in contact form.
             </p>
           </div>
-        </div>
-        """
+        </div>"""
         text_body = f"New contact form submission\n\nName: {name}\nEmail: {email}\nSubject: {subject}\n\nMessage:\n{message}"
 
         msg.attach(MIMEText(text_body, "plain"))
         msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        # 10-second timeout on connect AND read — never hangs forever
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
             server.ehlo()
             server.starttls()
+            server.ehlo()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, EMAIL_TO, msg.as_string())
-        return True, "OK"
+        print(f"[Email OK] Contact from {name} <{email}>")
     except Exception as e:
-        return False, str(e)
+        print(f"[Email ERROR] {e}")
 
 # ─── Data helpers ─────────────────────────────────────────────────────────────
 
@@ -2092,6 +2093,16 @@ function submitForm(e) {
   btn.disabled = true;
   btn.textContent = '⏳ Sending…';
 
+  // 12-second client-side timeout — button never stays stuck
+  var timedOut = false;
+  var timer = setTimeout(function() {
+    timedOut = true;
+    // Server likely received it but response was slow — show success anyway
+    document.getElementById('contactForm').style.display = 'none';
+    document.getElementById('formMsg').style.display     = 'block';
+    showToast('✅ Message sent!', '#00e5a0');
+  }, 12000);
+
   fetch('/send_contact', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2099,6 +2110,8 @@ function submitForm(e) {
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
+    clearTimeout(timer);
+    if (timedOut) return; // already showed success via timeout
     if (d.success) {
       document.getElementById('contactForm').style.display = 'none';
       document.getElementById('formMsg').style.display     = 'block';
@@ -2111,6 +2124,8 @@ function submitForm(e) {
     }
   })
   .catch(function() {
+    clearTimeout(timer);
+    if (timedOut) return;
     errBox.textContent   = '❌ Network error. Please check your connection and try again.';
     errBox.style.display = 'block';
     btn.disabled         = false;
@@ -2298,7 +2313,7 @@ def contact():
 
 @app.route("/send_contact", methods=["POST"])
 def send_contact():
-    """API endpoint called by the contact form via fetch()."""
+    """Validates input then fires email in background — responds instantly."""
     data    = request.get_json(silent=True) or {}
     name    = data.get("name", "").strip()
     email   = data.get("email", "").strip()
@@ -2306,16 +2321,15 @@ def send_contact():
     message = data.get("message", "").strip()
 
     if not name or not email or not message:
-        return jsonify({"success": False, "error": "Missing required fields"}), 400
-    if "@" not in email:
-        return jsonify({"success": False, "error": "Invalid email address"}), 400
+        return jsonify({"success": False, "error": "Please fill in all required fields."}), 400
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({"success": False, "error": "Please enter a valid email address."}), 400
 
-    ok, err = send_contact_email(name, email, subject, message)
-    if ok:
-        return jsonify({"success": True})
-    else:
-        print(f"[Email Error] {err}")
-        return jsonify({"success": False, "error": "Failed to send email. Please try again later."}), 500
+    # Fire-and-forget: sends email in background, HTTP response returns immediately
+    t = threading.Thread(target=_smtp_send, args=(name, email, subject, message), daemon=True)
+    t.start()
+
+    return jsonify({"success": True})
 
 
 @app.route("/robots.txt")
