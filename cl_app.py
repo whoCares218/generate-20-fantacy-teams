@@ -2032,7 +2032,7 @@ CONTACT_BODY = """
 <p class="last-updated">We'd love to hear from you — feedback, bug reports, or partnership enquiries.</p>
 
 <h2>Get in Touch</h2>
-<p>📧 Direct Email: <a href="mailto:tehem81111@gmail.com">tehem81111@gmail.com</a></p>
+<p>📧 Direct Email: <a href="mailto:tehm8111@gmail.com">tehm8111@gmail.com</a></p>
 <p>We aim to respond to all enquiries within 48 business hours.</p>
 
 <h2>Send a Message</h2>
