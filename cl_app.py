@@ -926,15 +926,67 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--gld); outline-o
   .cv-nm     { color:#b8860b!important; }
 }
 
-@media(max-width:480px) {
+/* ── Mobile (≤ 768px) ── */
+@media(max-width:768px) {
+  :root { --hdr-h: 52px; --step-h: 44px; }
+  body  { font-size: 14px; }
   header { padding: 0 14px; }
-  .wrap  { padding: 16px 13px 64px; }
-  .match-grid { grid-template-columns: 1fr; }
-  .mode-grid  { grid-template-columns: 1fr; }
-  .input-row  { flex-direction: column; }
-  .team-grid  { grid-template-columns: 1fr; }
-  .modal-box  { padding: 26px 22px; }
+  .logo  { font-size: 1.05rem; letter-spacing: 1px; }
   .hdr-nav a:not(.cta) { display: none; }
+  .hdr-nav a.cta { padding: 6px 13px; font-size: .82rem; }
+  .step-bar { padding: 0 12px; }
+  .step-lbl { display: none; }
+  .step-line { margin: 0 4px; }
+  .wrap  { padding: 14px 12px 60px; }
+  .match-grid { grid-template-columns: 1fr; gap: 8px; }
+  .match-vs   { font-size: 1.2rem; }
+  .mode-grid  { grid-template-columns: 1fr; gap: 8px; }
+  .mode-card  { padding: 16px 14px; }
+  .mode-name  { font-size: 1.1rem; }
+  .adv-body   { padding: 14px; }
+  .input-row  { flex-direction: column; gap: 10px; }
+  .crit-grid  { grid-template-columns: 1fr; }
+  .team-grid  { grid-template-columns: 1fr; gap: 10px; }
+  .modal-box  { padding: 22px 16px; margin: 0 10px; }
+  .btn-xl     { padding: 13px 22px; font-size: 1rem; letter-spacing: 1px; }
+  .btn-lg     { padding: 11px 22px; font-size: .95rem; }
+  .btn-row    { flex-direction: column; gap: 8px; }
+  .btn-row .btn { width: 100%; justify-content: center; }
+  .stats-bar  { gap: 6px; }
+  .stat-chip  { padding: 8px 10px; min-width: 60px; }
+  .match-strip { padding: 12px 14px; flex-direction: column; gap: 10px; }
+  .strip-right { margin-left: 0; }
+  .strip-vs    { font-size: 1.2rem; }
+  .cv-row      { flex-direction: column; gap: 5px; }
+  .unlock-banner { padding: 20px 16px; }
+  .unlock-banner h3 { font-size: 1.2rem; }
+  .unlock-perks { gap: 10px; }
+  .strategy-grid { grid-template-columns: 1fr; }
+  .about-grid    { grid-template-columns: 1fr; }
+  .footer-grid   { grid-template-columns: 1fr; gap: 18px; }
+  .footer-bottom { flex-direction: column; text-align: center; gap: 4px; }
+  .footer-trust  { gap: 6px; }
+  .trust-badge   { font-size: .6rem; padding: 4px 9px; }
+  .legal-wrap    { padding: 28px 14px 70px; }
+  .legal-wrap h1 { font-size: 1.5rem; }
+  .content-section { padding: 0 14px; }
+  .adv-group-title { font-size: .65rem; }
+  .age-gate-box { padding: 30px 20px 24px; }
+  .age-gate-btn-row { flex-direction: column; gap: 8px; }
+  .age-gate-yes, .age-gate-no { width: 100%; }
+  .chip-picker  { padding: 10px; }
+  .pchip        { padding: 4px 9px; }
+  .pchip-name   { font-size: .68rem; }
+  .tab-btn      { padding: 6px 12px; font-size: .75rem; }
+  div[style*="grid-template-columns:1fr 1fr"] { display: grid !important; grid-template-columns: 1fr !important; gap: 12px !important; }
+}
+
+/* ── Small phones (≤ 380px) ── */
+@media(max-width:380px) {
+  .logo  { font-size: .92rem; }
+  .btn-xl { padding: 12px 16px; font-size: .92rem; }
+  .match-vs { font-size: 1.05rem; }
+  .modal-box { padding: 18px 12px; }
 }
 </style>
 <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9904803540658016" crossorigin="anonymous"></script>
@@ -955,7 +1007,7 @@ _FOOTER = """
     <div class="footer-col">
       <h4>⚡ AI Fantasy Team Generator</h4>
       <p>India's #1 <strong>AI Fantasy Team Generator</strong> for cricket. Generate 20 unique AI-powered Dream11 teams for IPL, T20 World Cup, ICC tournaments and all major cricket leagues — in seconds.</p>
-      <p style="margin-top:9px;">📧 <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a></p>
+      <p style="margin-top:9px;">📧 <a href="/contact">our contact form</a></p>
     </div>
     <div class="footer-col">
       <h4>Quick Links</h4>
@@ -979,7 +1031,6 @@ _FOOTER = """
   <div class="footer-trust z1">
     <span class="trust-badge">🔒 Privacy First</span>
     <span class="trust-badge">🚫 No Login Required</span>
-    <span class="trust-badge">✅ AdSense Compliant</span>
     <span class="trust-badge">⚡ Instant Generation</span>
     <span class="trust-badge">📊 Smart Algorithm</span>
   </div>
@@ -1309,6 +1360,14 @@ HOME_PAGE = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- ── Generate buttons: between Step 2 and Step 3 ── -->
+  <div class="btn-row" id="generateBtnRow" style="margin-top:6px;margin-bottom:10px;">
+    <button class="btn btn-gold btn-xl" id="generateBtn" onclick="doGenerate()" aria-label="Generate AI fantasy teams">
+      🤖 Generate AI Teams
+    </button>
+    <button class="btn btn-ghost" onclick="resetAll()" aria-label="Reset all">↺ Reset All</button>
+  </div>
+
   <div id="section-criteria">
     <h2 class="sh">Advanced Criteria <small>Step 3 · Optional</small></h2>
 
@@ -1405,12 +1464,6 @@ HOME_PAGE = """<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="btn-row">
-      <button class="btn btn-gold btn-xl" id="generateBtn" onclick="doGenerate()" aria-label="Generate AI fantasy teams">
-        🤖 Generate AI Teams
-      </button>
-      <button class="btn btn-ghost" onclick="resetAll()" aria-label="Reset all">↺ Reset All</button>
-    </div>
   </div>
 
 </main>
@@ -1951,7 +2004,7 @@ PRIVACY_BODY = """
 <h2>Children's Privacy</h2>
 <p>This website is intended for users aged 18 and over. We do not knowingly collect personally identifiable information from anyone under the age of 18.</p>
 <h2>Contact Us</h2>
-<p>If you have questions about this Privacy Policy, contact us at: <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a> or via our <a href="/contact">Contact page</a>.</p>
+<p>If you have questions about this Privacy Policy, contact us at: <a href="/contact">our contact form</a> or via our <a href="/contact">Contact page</a>.</p>
 """
 
 TERMS_BODY = """
@@ -1968,7 +2021,7 @@ TERMS_BODY = """
 <h2>Governing Law</h2>
 <p>These Terms shall be governed and construed in accordance with the laws of India.</p>
 <h2>Contact</h2>
-<p>For any questions regarding these Terms, please contact us at <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a>.</p>
+<p>For any questions regarding these Terms, please contact us at <a href="/contact">our contact form</a>.</p>
 """
 
 ABOUT_BODY = """
@@ -2024,7 +2077,7 @@ DISCLAIMER_BODY = """
 <h2>18+ Notice</h2>
 <p>This website is strictly intended for users aged 18 and above.</p>
 <h2>Contact</h2>
-<p>Questions about this Disclaimer? Contact us at <a href="mailto:contact@fantasyxi.in">contact@fantasyxi.in</a>.</p>
+<p>Questions about this Disclaimer? Contact us at <a href="/contact">our contact form</a>.</p>
 """
 
 CONTACT_BODY = """
@@ -2032,7 +2085,7 @@ CONTACT_BODY = """
 <p class="last-updated">We'd love to hear from you — feedback, bug reports, or partnership enquiries.</p>
 
 <h2>Get in Touch</h2>
-<p>📧 Direct Email: <a href="mailto:tehm8111@gmail.com">tehm8111@gmail.com</a></p>
+<p>📧 Use the form below — we respond within 48 business hours.</p>
 <p>We aim to respond to all enquiries within 48 business hours.</p>
 
 <h2>Send a Message</h2>
@@ -2203,87 +2256,208 @@ def unlock():
 
 @app.route("/export_pdf")
 def export_pdf():
-    try:
-        from reportlab.lib.pagesizes import A4
-        from reportlab.lib.units import cm
-        from reportlab.lib import colors
-        from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
-                                        Table, TableStyle, HRFlowable, PageBreak)
-        from reportlab.lib.styles import ParagraphStyle
-    except ImportError:
-        return "reportlab not installed. Run: pip install reportlab --break-system-packages", 500
-
-    gen = session.get("gen", {})
-    teams = gen.get("teams", [])
-    if not teams: return "No teams in session. Please generate teams first.", 400
+    """Zero external libraries — renders a print-ready HTML page.
+    The browser's built-in Save as PDF does the conversion.
+    No reportlab, no weasyprint, no wkhtmltopdf needed."""
+    gen      = session.get("gen", {})
+    teams    = gen.get("teams", [])
+    if not teams:
+        return "No teams found. Please generate teams first.", 400
 
     team1    = gen.get("team1", "T1")
     team2    = gen.get("team2", "T2")
     mode     = gen.get("mode", "balanced").upper()
     venue    = gen.get("venue", "")
     unlocked = session.get("unlocked", False)
+    max_idx  = len(teams) if unlocked else 3
 
-    GOLD  = colors.HexColor("#f5c842")
-    DARK  = colors.HexColor("#141926")
-    DARK2 = colors.HexColor("#0c1220")
-    MUTED = colors.HexColor("#64748b")
-    WHT   = colors.white
+    role_abbr = {
+        "Wicketkeeper-Batsman": "WK",
+        "Batsman": "BAT",
+        "All-rounder": "AR",
+        "Bowler": "BOWL",
+    }
+    risk_color = {"Low": "#00e5a0", "Medium": "#4db8ff", "High": "#ff4d6d"}
 
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=1.4*cm, rightMargin=1.4*cm,
-                            topMargin=1.8*cm, bottomMargin=1.8*cm)
-
-    def S(n, **kw): return ParagraphStyle(n, **kw)
-    sT   = S("t",  fontSize=22, textColor=GOLD, fontName="Helvetica-Bold", alignment=1, spaceAfter=4)
-    sS   = S("s",  fontSize=9,  textColor=MUTED, alignment=1, spaceAfter=4)
-    sTH  = S("th", fontSize=14, textColor=GOLD, fontName="Helvetica-Bold", spaceAfter=5, spaceBefore=4)
-    sCV  = S("cv", fontSize=9,  textColor=WHT, spaceAfter=5)
-    sFT  = S("ft", fontSize=7.5, textColor=MUTED, spaceBefore=3)
-
-    story = []
-    story.append(Paragraph("AI Fantasy Team Generator", sT))
-    story.append(Paragraph("fantasyxi.in", sS))
-    story.append(Paragraph(f"{team1} VS {team2}  ·  {mode} Mode  ·  Playing XI Only", sS))
-    if venue: story.append(Paragraph(f"📍 {venue}", sS))
-    story.append(Spacer(1, .25*cm))
-    story.append(HRFlowable(width="100%", thickness=1.5, color=GOLD))
-    story.append(Spacer(1, .5*cm))
-
-    max_idx = len(teams) if unlocked else 3
+    cards_html = ""
     for idx, t in enumerate(teams[:max_idx]):
-        story.append(Paragraph(f"Team {idx+1}", sTH))
-        story.append(Paragraph(
-            f"<b><font color='#f5c842'>Captain (2×):</font></b>  {t['captain']}     "
-            f"<b><font color='#4db8ff'>Vice Captain (1.5×):</font></b>  {t['vice_captain']}", sCV))
-        rows = [["#", "Player", "Role", "Risk"]]
-        for pi, player in enumerate(t["players"]):
-            tag = " (C)" if player["name"] == t["captain"] else (" (VC)" if player["name"] == t["vice_captain"] else "")
-            rows.append([str(pi+1), player["name"]+tag, player["role"], player["risk_level"]])
-        tbl = Table(rows, colWidths=[.7*cm, 7*cm, 4.5*cm, 2.5*cm])
-        tbl.setStyle(TableStyle([
-            ("BACKGROUND",    (0,0), (-1,0), DARK2),
-            ("TEXTCOLOR",     (0,0), (-1,0), GOLD),
-            ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
-            ("FONTSIZE",      (0,0), (-1,-1), 8.5),
-            ("TEXTCOLOR",     (0,1), (-1,-1), WHT),
-            ("ROWBACKGROUNDS",(0,1), (-1,-1), [DARK, colors.HexColor("#18202e")]),
-            ("GRID",          (0,0), (-1,-1), .3, colors.HexColor("#2a2b45")),
-            ("ALIGN",         (0,0), (0,-1), "CENTER"),
-            ("TOPPADDING",    (0,0), (-1,-1), 5),
-            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
-            ("LEFTPADDING",   (0,0), (-1,-1), 7),
-        ]))
-        story.append(tbl)
-        story.append(Paragraph(f"{t['from_t1']} from {team1}  |  {t['from_t2']} from {team2}", sFT))
-        story.append(Spacer(1, .55*cm))
-        if (idx+1) % 2 == 0 and idx < max_idx-1:
-            story.append(PageBreak())
+        players_rows = ""
+        for p in t["players"]:
+            is_c  = p["name"] == t["captain"]
+            is_vc = p["name"] == t["vice_captain"]
+            tag   = " <b style='color:#f5c842'>(C)</b>" if is_c else (" <b style='color:#4db8ff'>(VC)</b>" if is_vc else "")
+            rc    = risk_color.get(p["risk_level"], "#fff")
+            ra    = role_abbr.get(p["role"], p["role"])
+            players_rows += f"""<tr>
+              <td style="padding:5px 8px;border-bottom:1px solid #e8e8e8;">{p["name"]}{tag}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #e8e8e8;color:#555;font-size:.8rem;">{ra}</td>
+              <td style="padding:5px 8px;border-bottom:1px solid #e8e8e8;text-align:center;">
+                <span style="background:{rc}22;color:{rc};font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:4px;border:1px solid {rc}55;">{p["risk_level"]}</span>
+              </td>
+            </tr>"""
 
-    doc.build(story)
-    buf.seek(0)
-    return send_file(buf, mimetype="application/pdf", as_attachment=True,
-                     download_name=f"AIFantasyTeamGenerator_{team1}_vs_{team2}_{mode}.pdf")
+        cards_html += f"""
+        <div class="team-card">
+          <div class="card-hdr">
+            <span class="team-num">Team {idx+1}</span>
+            <span class="badge">{"FREE ✓" if idx < 3 else "UNLOCKED"}</span>
+          </div>
+          <div class="cv-strip">
+            <div class="cv-box">
+              <div class="cv-lbl">Captain 2×</div>
+              <div class="cv-name cap">{t["captain"]}</div>
+            </div>
+            <div class="cv-box">
+              <div class="cv-lbl">Vice Captain 1.5×</div>
+              <div class="cv-name vc">{t["vice_captain"]}</div>
+            </div>
+          </div>
+          <table class="player-table" width="100%" cellspacing="0">
+            <thead>
+              <tr style="background:#f8f8f8;">
+                <th style="padding:5px 8px;text-align:left;font-size:.72rem;color:#888;font-weight:600;">PLAYER</th>
+                <th style="padding:5px 8px;text-align:left;font-size:.72rem;color:#888;font-weight:600;">ROLE</th>
+                <th style="padding:5px 8px;text-align:center;font-size:.72rem;color:#888;font-weight:600;">RISK</th>
+              </tr>
+            </thead>
+            <tbody>{players_rows}</tbody>
+          </table>
+          <div class="card-foot">{t["from_t1"]} from {team1} &nbsp;·&nbsp; {t["from_t2"]} from {team2}</div>
+        </div>"""
+
+    venue_line = f"<p style='margin:2px 0 0;font-size:.8rem;color:#666;'>📍 {venue}</p>" if venue else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Fantasy Teams — {team1} vs {team2}</title>
+<style>
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family: Arial, Helvetica, sans-serif; background:#fff; color:#111; font-size:13px; }}
+
+  .site-header {{
+    background: linear-gradient(135deg,#f5c842,#d4a212);
+    padding: 14px 24px; display:flex; justify-content:space-between; align-items:center;
+  }}
+  .site-header h1 {{ font-size:1.1rem; font-weight:800; color:#000; letter-spacing:1px; }}
+  .site-header p  {{ font-size:.72rem; color:#222; }}
+
+  .meta-bar {{
+    background:#111; color:#fff; padding:10px 24px;
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  }}
+  .meta-bar .vs  {{ font-size:1.1rem; font-weight:800; letter-spacing:1px; }}
+  .meta-bar .vs em {{ color:#f5c842; font-style:normal; margin:0 6px; font-size:.8rem; }}
+  .pill {{
+    display:inline-block; padding:2px 10px; border-radius:100px;
+    font-size:.65rem; font-weight:700; letter-spacing:.8px; border:1px solid;
+  }}
+  .pill-safe    {{ background:rgba(0,229,160,.15);  color:#00e5a0; border-color:rgba(0,229,160,.3); }}
+  .pill-balanced{{ background:rgba(77,184,255,.15); color:#4db8ff; border-color:rgba(77,184,255,.3); }}
+  .pill-risky   {{ background:rgba(255,77,109,.15); color:#ff4d6d; border-color:rgba(255,77,109,.3); }}
+  .pill-neutral {{ background:rgba(255,255,255,.1); color:#ccc;    border-color:rgba(255,255,255,.2); }}
+
+  .print-note {{
+    background:#fffbea; border:1px solid #f5c842; border-radius:8px;
+    padding:12px 20px; margin:18px 20px; font-size:.82rem; color:#7a5c00;
+    display:flex; align-items:center; gap:10px;
+  }}
+  .print-note button {{
+    background:linear-gradient(135deg,#f5c842,#d4a212); border:none; border-radius:6px;
+    padding:7px 18px; font-size:.82rem; font-weight:700; cursor:pointer; color:#000;
+    white-space:nowrap;
+  }}
+  .print-note button:hover {{ opacity:.9; }}
+
+  .teams-wrap {{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap:14px; padding:0 20px 30px;
+  }}
+
+  .team-card {{
+    border:1px solid #ddd; border-radius:10px; overflow:hidden;
+    break-inside:avoid; page-break-inside:avoid;
+  }}
+  .card-hdr {{
+    background:linear-gradient(135deg,#1a1e30,#0d1020);
+    padding:9px 13px; display:flex; justify-content:space-between; align-items:center;
+  }}
+  .team-num {{ color:#f5c842; font-weight:800; font-size:.88rem; letter-spacing:2px; }}
+  .badge    {{ background:#00e5a0; color:#000; font-size:.6rem; font-weight:800;
+               padding:2px 9px; border-radius:100px; letter-spacing:.8px; }}
+
+  .cv-strip {{ display:flex; gap:6px; padding:9px 10px 6px; background:#fafafa; }}
+  .cv-box   {{ flex:1; border:1px solid #eee; border-radius:6px; padding:6px 8px; text-align:center; }}
+  .cv-lbl   {{ font-size:.58rem; color:#999; text-transform:uppercase; letter-spacing:.4px; margin-bottom:2px; font-weight:600; }}
+  .cv-name  {{ font-weight:700; font-size:.78rem; }}
+  .cv-name.cap {{ color:#b8860b; }}
+  .cv-name.vc  {{ color:#1a6fa6; }}
+
+  .player-table {{ border-collapse:collapse; }}
+  .card-foot {{
+    padding:7px 10px; background:#f8f8f8; border-top:1px solid #eee;
+    font-size:.65rem; color:#888; text-align:center;
+  }}
+
+  @media print {{
+    body {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+    .print-note {{ display:none !important; }}
+    .site-header, .meta-bar {{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }}
+    .teams-wrap {{ grid-template-columns: repeat(2, 1fr); gap:10px; padding:0 10px 20px; }}
+    @page {{ margin:12mm 10mm; size:A4; }}
+  }}
+
+  @media(max-width:600px) {{
+    .teams-wrap {{ grid-template-columns:1fr; padding:0 12px 24px; }}
+    .print-note {{ margin:12px; flex-direction:column; align-items:flex-start; gap:8px; }}
+  }}
+</style>
+</head>
+<body>
+
+<div class="site-header">
+  <div>
+    <h1>⚡ AI Fantasy Team Generator</h1>
+    <p>fantasyxi.in · AI-powered fantasy cricket teams</p>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:.75rem;color:#222;">{len(teams[:max_idx])} Teams · {mode} Mode</div>
+    <div style="font-size:.65rem;color:#444;margin-top:2px;">{datetime.date.today().strftime("%d %b %Y")}</div>
+  </div>
+</div>
+
+<div class="meta-bar">
+  <span class="vs">{team1}<em>VS</em>{team2}</span>
+  {venue_line.replace("style='", 'style="color:#bbb;font-size:.75rem;margin:0;"').replace("'", '"') if venue else ""}
+  <span class="pill pill-{mode.lower()}">{mode}</span>
+  <span class="pill pill-neutral">{len(teams[:max_idx])} Teams</span>
+</div>
+
+<div class="print-note">
+  <span>💡 <strong>Save as PDF:</strong> Click the button → your browser will open Print → choose "Save as PDF"</span>
+  <button onclick="window.print()">🖨 Save as PDF</button>
+</div>
+
+<div class="teams-wrap">
+  {cards_html}
+</div>
+
+<script>
+  // Auto-trigger print dialog after 600ms for instant PDF experience
+  setTimeout(function() {{
+    // Only auto-open if user came here directly (not navigating away)
+    if (document.visibilityState === 'visible') {{
+      window.print();
+    }}
+  }}, 800);
+</script>
+</body>
+</html>"""
+
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/privacy")
