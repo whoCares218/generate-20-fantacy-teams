@@ -1,22 +1,15 @@
 {
   "tournament": "ICC Men's T20 World Cup 2026 ",
   "matches": [
-  { 
-    "match_id": "SF_01", 
-    "date": "2026-03-04", 
-    "time": "07:00 PM IST", 
-    "venue": "Eden Gardens, Kolkata", 
-    "team1": "South Africa", 
-    "team2": "New Zealand" 
-  },
-  { 
-    "match_id": "SF_02", 
-    "date": "2026-03-05", 
-    "time": "07:00 PM IST", 
-    "venue": "Wankhede Stadium, Mumbai", 
-    "team1": "India", 
-    "team2": "England" 
-  }
+ { 
+  "match_id": "FIN_01", 
+  "date": "2026-03-08", 
+  "time": "07:00 PM IST", 
+  "venue": "Narendra Modi Stadium, Ahmedabad", 
+  "team1": "India", 
+  "team2": "New Zealand" 
+}
 ]
 }
+
 
