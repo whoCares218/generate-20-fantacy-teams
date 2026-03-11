@@ -959,7 +959,7 @@ HOME_PAGE = """<!DOCTYPE html>
     <div class="match-grid" role="list">
     {% for m in matches %}
       <div class="match-card" role="listitem" tabindex="0"
-        onclick="selectMatch('{{m.match_id}}','{{m.team1}}','{{m.team2}}','{{m.date}}','{{m.venue|replace(chr(39),chr(32))}}',this)"
+        data-mid="{{m.match_id}}" data-t1="{{m.team1}}" data-t2="{{m.team2}}" data-date="{{m.date}}" data-venue="{{m.safe_venue}}" onclick="selectMatchEl(this)"
         onkeydown="if(event.key==='Enter')this.click()">
         <div class="match-time">{{m.time}}</div>
         <div class="match-id-tag">📅 {{m.date}} · {{m.match_id}}</div>
@@ -1238,6 +1238,10 @@ function toggleAdv(header){
   var isOpen=arrow.classList.contains('open');
   if(isOpen){body.style.display='none';arrow.classList.remove('open');header.setAttribute('aria-expanded','false');}
   else{body.style.display='';arrow.classList.add('open');header.setAttribute('aria-expanded','true');}
+}
+function selectMatchEl(el){
+  var id=el.dataset.mid,t1=el.dataset.t1,t2=el.dataset.t2,date=el.dataset.date,venue=el.dataset.venue;
+  selectMatch(id,t1,t2,date,venue,el);
 }
 function selectMatch(id,t1,t2,date,venue,el){
   selMID=id;selT1=t1;selT2=t2;
@@ -2165,10 +2169,15 @@ def home():
     td = load_teams()
     md = load_matches()
     players_json = {t["team"]: t["players"][:11] for t in td["teams"]}
+    # Sanitize venues for safe HTML attribute embedding
+    matches = md["matches"]
+    for m in matches:
+        m["safe_venue"] = m.get("venue","").replace("'","").replace('"',"")
+
     return render_template_string(
         HOME_PAGE,
         tournament=td.get("tournament", "FantasyXI AI"),
-        matches=md["matches"],
+        matches=matches,
         all_teams=td["teams"],
         players_json=players_json,
     )
